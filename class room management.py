@@ -21,7 +21,7 @@ except Exception as e:
     st.error(f"Failed to connect to Database: {e}")
     st.stop()
 
-# Build schema using SQLite specific datatypes
+# Build schema using SQLite specific datatypes and syntax
 myproj.execute('''CREATE TABLE IF NOT EXISTS student(
     ID TEXT PRIMARY KEY NOT NULL,
     UserName TEXT UNIQUE NOT NULL,
@@ -30,7 +30,7 @@ myproj.execute('''CREATE TABLE IF NOT EXISTS student(
 )''')
 
 myproj.execute('''CREATE TABLE IF NOT EXISTS grades (
-    grade_id INTEGER PRIMARY KEY AUTO_INCREMENT,
+    grade_id INTEGER PRIMARY KEY AUTOINCREMENT,
     stud_id TEXT NOT NULL,            
     subject TEXT NOT NULL,
     marks INTEGER NOT NULL,
@@ -38,7 +38,7 @@ myproj.execute('''CREATE TABLE IF NOT EXISTS grades (
 )''')
 
 myproj.execute('''CREATE TABLE IF NOT EXISTS attendence(
-    attendence_id INTEGER PRIMARY KEY AUTO_INCREMENT,
+    attendence_id INTEGER PRIMARY KEY AUTOINCREMENT,
     stud_id TEXT,
     date TEXT,
     status TEXT NOT NULL,
