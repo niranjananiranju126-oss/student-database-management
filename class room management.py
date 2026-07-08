@@ -1,71 +1,66 @@
-
-
 import streamlit as st
-import mysql.connector
+import sqlite3
 import bcrypt
 import pandas as pd
 
 # ---------------------------------------------------------
-# 1. DATABASE CONNECTION & INITIALIZATION
+# 1. DATABASE CONNECTION & INITIALIZATION (SQLite Cloud-Ready)
 # ---------------------------------------------------------
 @st.cache_resource
 def init_connection():
-    """Establishes connection to MySQL and caches it."""
-    return mysql.connector.connect(
-        host="localhost",
-        port="3306",
-        user="root",
-        password="Niraramesh126@",
-        autocommit=True # Ensures instant commits across reruns
-    )
+    """Establishes connection to a local SQLite file database and caches it."""
+    # This automatically creates 'classroom.db' inside your GitHub repository folder on execution
+    return sqlite3.connect("classroom.db", check_same_thread=False)
 
 try:
     myconnect = init_connection()
-    myproj = myconnect.cursor(buffered=True) # Buffered prevents out-of-sync queries
+    myproj = myconnect.cursor()
+    # Enable foreign key constraint support explicitly in SQLite
+    myproj.execute("PRAGMA foreign_keys = ON;")
 except Exception as e:
     st.error(f"Failed to connect to Database: {e}")
     st.stop()
 
-# Build schema
-myproj.execute("CREATE DATABASE IF NOT EXISTS STUDCLASS;")
-myproj.execute("USE STUDCLASS;")
-
+# Build schema using SQLite specific datatypes
 myproj.execute('''CREATE TABLE IF NOT EXISTS student(
-    ID VARCHAR(12) PRIMARY KEY NOT NULL,
-    UserName VARCHAR(20) UNIQUE NOT NULL,
+    ID TEXT PRIMARY KEY NOT NULL,
+    UserName TEXT UNIQUE NOT NULL,
     Password BLOB NOT NULL,
-    Role VARCHAR(20) NOT NULL
+    Role TEXT NOT NULL
 )''')
 
 myproj.execute('''CREATE TABLE IF NOT EXISTS grades (
-    grade_id INT AUTO_INCREMENT PRIMARY KEY,
-    stud_id VARCHAR(12) NOT NULL,            
-    subject VARCHAR(20) NOT NULL,
-    marks INT NOT NULL,
+    grade_id INTEGER PRIMARY KEY AUTO_INCREMENT,
+    stud_id TEXT NOT NULL,            
+    subject TEXT NOT NULL,
+    marks INTEGER NOT NULL,
     FOREIGN KEY (stud_id) REFERENCES student(ID) ON DELETE CASCADE
 )''')
 
 myproj.execute('''CREATE TABLE IF NOT EXISTS attendence(
-    attendence_id INT AUTO_INCREMENT PRIMARY KEY,
-    stud_id VARCHAR(12),
-    date VARCHAR(10),
-    status VARCHAR(10) NOT NULL,
+    attendence_id INTEGER PRIMARY KEY AUTO_INCREMENT,
+    stud_id TEXT,
+    date TEXT,
+    status TEXT NOT NULL,
     FOREIGN KEY (stud_id) REFERENCES student(ID) ON DELETE CASCADE
 )''')
+myconnect.commit()
 
 # Seed Admin account if missing
 myproj.execute("SELECT COUNT(*) FROM student WHERE Role = 'admin'")
 if myproj.fetchone()[0] == 0:
     hasha = bcrypt.hashpw(b"admin123", bcrypt.gensalt())
-    myproj.execute("INSERT INTO student(ID, UserName, Password, Role) VALUES (%s, %s, %s, %s)", ("A01", "admin", hasha, "admin"))
+    myproj.execute("INSERT INTO student(ID, UserName, Password, Role) VALUES (?, ?, ?, ?)", ("A01", "admin", hasha, "admin"))
+    myconnect.commit()
 
 # Seed baseline data if completely empty
 myproj.execute("SELECT COUNT(*) FROM student")
 if myproj.fetchone()[0] <= 1:
     hasht = bcrypt.hashpw(b"teacher123", bcrypt.gensalt())
-    myproj.execute("INSERT INTO student(ID, UserName, Password, Role) VALUES (%s, %s, %s, %s)", ("T01", "niranjana", hasht, "teacher"))
+    myproj.execute("INSERT INTO student(ID, UserName, Password, Role) VALUES (?, ?, ?, ?)", ("T01", "niranjana", hasht, "teacher"))
     hashs = bcrypt.hashpw(b"student\\123", bcrypt.gensalt())
-    myproj.execute("INSERT INTO student(ID, UserName, Password, Role) VALUES (%s, %s, %s, %s)", ("S01", "nira", hashs, "student"))
+    myproj.execute("INSERT INTO student(ID, UserName, Password, Role) VALUES (?, ?, ?, ?)", ("S01", "nira", hashs, "student"))
+    myconnect.commit()
 
 
 # ---------------------------------------------------------
@@ -102,7 +97,7 @@ def login_page():
             if not username or not password:
                 st.error("Please enter both username and password.")
             else:
-                myproj.execute("SELECT ID, Password, Role FROM student WHERE UserName = %s", (username,))
+                myproj.execute("SELECT ID, Password, Role FROM student WHERE UserName = ?", (username,))
                 user_record = myproj.fetchone()
                 
                 if user_record:
@@ -142,16 +137,17 @@ def admin_dashboard():
                 if not new_id or not new_user or not new_pass:
                     st.error("All fields are required.")
                 else:
-                    myproj.execute("SELECT * FROM student WHERE ID = %s OR UserName = %s", (new_id, new_user))
+                    myproj.execute("SELECT * FROM student WHERE ID = ? OR UserName = ?", (new_id, new_user))
                     if myproj.fetchone():
                         st.error("Error: That User ID or Username is already registered.")
                     else:
                         hashed_pass = bcrypt.hashpw(new_pass.encode('utf-8'), bcrypt.gensalt())
                         try:
                             myproj.execute(
-                                "INSERT INTO student (ID, UserName, Password, Role) VALUES (%s, %s, %s, %s)",
+                                "INSERT INTO student (ID, UserName, Password, Role) VALUES (?, ?, ?, ?)",
                                 (new_id, new_user, hashed_pass, new_role)
                             )
+                            myconnect.commit()
                             st.success(f"Successfully registered '{new_user}' as a {new_role.capitalize()}!")
                         except Exception as err:
                             st.error(f"Database Error: {err}")
@@ -170,16 +166,15 @@ def admin_dashboard():
             user_ids = [user[0] for user in users]
             selected_delete_id = st.selectbox("Select User ID to Delete", user_ids)
             
-            # Fetch details of target to display before confirmation
-            myproj.execute("SELECT UserName, Role FROM student WHERE ID = %s", (selected_delete_id,))
+            myproj.execute("SELECT UserName, Role FROM student WHERE ID = ?", (selected_delete_id,))
             tgt_user = myproj.fetchone()
             
             if st.button(f"🗑️ Delete User {selected_delete_id} ({tgt_user[0]})", type="primary"):
                 try:
-                    # Explicit cleanup of child tables if schema lacks cascade rules
-                    myproj.execute("DELETE FROM grades WHERE stud_id = %s", (selected_delete_id,))
-                    myproj.execute("DELETE FROM attendence WHERE stud_id = %s", (selected_delete_id,))
-                    myproj.execute("DELETE FROM student WHERE ID = %s", (selected_delete_id,))
+                    myproj.execute("DELETE FROM grades WHERE stud_id = ?", (selected_delete_id,))
+                    myproj.execute("DELETE FROM attendence WHERE stud_id = ?", (selected_delete_id,))
+                    myproj.execute("DELETE FROM student WHERE ID = ?", (selected_delete_id,))
+                    myconnect.commit()
                     st.success(f"User {selected_delete_id} deleted successfully!")
                     st.rerun()
                 except Exception as ex:
@@ -198,6 +193,7 @@ def admin_dashboard():
                 myproj.execute("DELETE FROM grades;")
                 myproj.execute("DELETE FROM attendence;")
                 myproj.execute("DELETE FROM student WHERE Role != 'admin';")
+                myconnect.commit()
                 st.success("Database successfully cleared!")
                 st.rerun()
             except Exception as ex:
@@ -223,16 +219,17 @@ def teacher_dashboard():
                 if not s_id or not s_name or not s_pass:
                     st.error("All parameters are mandatory.")
                 else:
-                    myproj.execute("SELECT * FROM student WHERE ID = %s OR UserName = %s", (s_id, s_name))
+                    myproj.execute("SELECT * FROM student WHERE ID = ? OR UserName = ?", (s_id, s_name))
                     if myproj.fetchone():
                         st.error("Error: That ID or Username is already occupied.")
                     else:
                         hashed_pass = bcrypt.hashpw(s_pass.encode('utf-8'), bcrypt.gensalt())
                         try:
                             myproj.execute(
-                                "INSERT INTO student (ID, UserName, Password, Role) VALUES (%s, %s, %s, %s)",
+                                "INSERT INTO student (ID, UserName, Password, Role) VALUES (?, ?, ?, ?)",
                                 (s_id, s_name, hashed_pass, "student")
                             )
+                            myconnect.commit()
                             st.success(f"Student profile '{s_name}' successfully added!")
                         except Exception as err:
                             st.error(f"Database Error: {err}")
@@ -246,11 +243,12 @@ def teacher_dashboard():
             submit_marks = st.form_submit_button("Submit Marks")
             
             if submit_marks:
-                myproj.execute("SELECT Role FROM student WHERE ID = %s", (stud_id,))
+                myproj.execute("SELECT Role FROM student WHERE ID = ?", (stud_id,))
                 stud_check = myproj.fetchone()
                 
                 if stud_check and stud_check[0] == "student":
-                    myproj.execute("INSERT INTO grades (stud_id, subject, marks) VALUES (%s, %s, %s)", (stud_id, subject, marks))
+                    myproj.execute("INSERT INTO grades (stud_id, subject, marks) VALUES (?, ?, ?)", (stud_id, subject, marks))
+                    myconnect.commit()
                     st.success("Marks inserted successfully!")
                 else:
                     st.error("Error: Valid Student ID not found.")
@@ -264,11 +262,12 @@ def teacher_dashboard():
             submit_att = st.form_submit_button("Record Attendance")
             
             if submit_att:
-                myproj.execute("SELECT Role FROM student WHERE ID = %s", (stud_id,))
+                myproj.execute("SELECT Role FROM student WHERE ID = ?", (stud_id,))
                 stud_check = myproj.fetchone()
                 
                 if stud_check and stud_check[0] == "student":
-                    myproj.execute("INSERT INTO attendence (stud_id, date, status) VALUES (%s, %s, %s)", (stud_id, date, status))
+                    myproj.execute("INSERT INTO attendence (stud_id, date, status) VALUES (?, ?, ?)", (stud_id, date, status))
+                    myconnect.commit()
                     st.success(f"Attendance recorded for {date}!")
                 else:
                     st.error("Error: Valid Student ID not found.")
@@ -310,7 +309,7 @@ def student_dashboard():
     
     with tab1:
         st.subheader("Academic Performance")
-        myproj.execute("SELECT subject AS 'Subject', marks AS 'Marks' FROM grades WHERE stud_id = %s", (st.session_state.user_id,))
+        myproj.execute("SELECT subject AS 'Subject', marks AS 'Marks' FROM grades WHERE stud_id = ?", (st.session_state.user_id,))
         records = myproj.fetchall()
         if records:
             df = pd.DataFrame(records, columns=["Subject", "Marks"])
@@ -321,7 +320,7 @@ def student_dashboard():
     with tab2:
         st.subheader("Attendance Summary")
         myproj.execute(
-            "SELECT COUNT(*), SUM(CASE WHEN status = 'Present' THEN 1 ELSE 0 END) FROM attendence WHERE stud_id = %s", 
+            "SELECT COUNT(*), SUM(CASE WHEN status = 'Present' THEN 1 ELSE 0 END) FROM attendence WHERE stud_id = ?", 
             (st.session_state.user_id,)
         )
         res = myproj.fetchone()
