@@ -9,13 +9,11 @@ import pandas as pd
 @st.cache_resource
 def init_connection():
     """Establishes connection to a local SQLite file database and caches it."""
-    # This automatically creates 'classroom.db' inside your GitHub repository folder on execution
     return sqlite3.connect("classroom.db", check_same_thread=False)
 
 try:
     myconnect = init_connection()
     myproj = myconnect.cursor()
-    # Enable foreign key constraint support explicitly in SQLite
     myproj.execute("PRAGMA foreign_keys = ON;")
 except Exception as e:
     st.error(f"Failed to connect to Database: {e}")
@@ -309,6 +307,23 @@ def student_dashboard():
     
     with tab1:
         st.subheader("Academic Performance")
+        
+        # --- ADDED DATA FLOW DIAGRAM ---
+        st.write("### Performance Report Data Flow")
+        dfd_mermaid = """
+        graph LR
+            A[🍎 Teacher Input] -->|Enters Marks & Subject| B[(🗄️ grades Table)]
+            C[👤 Student Login] -->|Requests Dashboard| D[💻 Application Logic]
+            B -->|Queries Personal ID| D
+            D -->|Processes & Builds DataFrame| E[📊 Performance Report Card]
+            
+            style A fill:#f9f,stroke:#333,stroke-width:2px
+            style B fill:#bbf,stroke:#333,stroke-width:2px
+            style E fill:#bfb,stroke:#333,stroke-width:2px
+        """
+        st.mermaid(dfd_mermaid)
+        st.markdown("---")
+        
         myproj.execute("SELECT subject AS 'Subject', marks AS 'Marks' FROM grades WHERE stud_id = ?", (st.session_state.user_id,))
         records = myproj.fetchall()
         if records:
