@@ -2,6 +2,7 @@ import streamlit as st
 import sqlite3
 import bcrypt
 import pandas as pd
+from datetime import datetime
 
 # ---------------------------------------------------------
 # 1. DATABASE CONNECTION & INITIALIZATION
@@ -198,6 +199,10 @@ def teacher_dashboard():
     st.title("🍎 Teacher Workspace")
     st.caption("🔴 Faculty Access Mode Activated")
     
+    # Pre-fetch dynamic list of active students to populate dropdowns and button arrays
+    myproj.execute("SELECT ID, UserName FROM student WHERE Role = 'student'")
+    students_list = myproj.fetchall()
+    
     tab1, tab2, tab3, tab4 = st.tabs(["🆕 Add New Student", "📝 Log Marks", "📅 Check Attendance", "📋 View Logs"])
     
     with tab1:
@@ -225,55 +230,74 @@ def teacher_dashboard():
                             )
                             myconnect.commit()
                             st.success(f"Student profile '{s_name}' successfully added!")
+                            st.rerun()
                         except Exception as err:
                             st.error(f"Database Error: {err}")
 
     with tab2:
         st.subheader("Log Academic Grades")
-        with st.form("marks_form", clear_on_submit=True):
-            c1, c2 = st.columns(2)
-            stud_id = c1.text_input("Target Student ID").strip()
-            subject = c2.text_input("Academic Subject").strip()
-            marks = st.number_input("Score (0-100)", min_value=0, max_value=100, step=1)
-            submit_marks = st.form_submit_button("Commit Score to Database")
+        if not students_list:
+            st.info("No active student records available. Please register a student profile first.")
+        else:
+            student_options = {f"{name} ({sid})": sid for sid, name in students_list}
             
-            if submit_marks:
-                myproj.execute("SELECT Role FROM student WHERE ID = ?", (stud_id,))
-                stud_check = myproj.fetchone()
-                if stud_check and stud_check[0] == "student":
-                    myproj.execute("INSERT INTO grades (stud_id, subject, marks) VALUES (?, ?, ?)", (stud_id, subject, marks))
-                    myconnect.commit()
-                    st.success("Marks saved successfully.")
-                else:
-                    st.error("Error: Student ID not found.")
+            with st.form("marks_form", clear_on_submit=True):
+                c1, c2 = st.columns(2)
+                selected_student_label = c1.selectbox("Target Student Profile", options=list(student_options.keys()))
+                target_stud_id = student_options[selected_student_label]
+                
+                # Preset popular academic subjects to prevent mechanical typos
+                subject = c2.selectbox("Academic Subject", ["Mathematics", "Science", "English", "History", "Computer Science"])
+                marks = st.number_input("Score (0-100)", min_value=0, max_value=100, step=1, value=75)
+                submit_marks = st.form_submit_button("Commit Score to Database")
+                
+                if submit_marks:
+                    try:
+                        myproj.execute("INSERT INTO grades (stud_id, subject, marks) VALUES (?, ?, ?)", (target_stud_id, subject, marks))
+                        myconnect.commit()
+                        st.success(f"Saved mark of {marks} for {selected_student_label} in {subject} successfully!")
+                    except Exception as err:
+                        st.error(f"Failed to record grade entry: {err}")
                     
     with tab3:
         st.subheader("Log Session Attendance")
-        with st.form("attendance_form", clear_on_submit=True):
-            c1, c2 = st.columns(2)
-            stud_id = c1.text_input("Target Student ID", key="att_stud_id").strip()
-            date = c2.date_input("Session Date").strftime("%d-%m-%Y")
-            status = st.radio("Status Definition", ["Present", "Absent"], horizontal=True)
-            submit_att = st.form_submit_button("Record Session Entry")
+        
+        # Date selection applies to the global active session row submission
+        session_date = st.date_input("Session Date", value=datetime.today()).strftime("%d-%m-%Y")
+        st.write("Clicking a student's button registers their baseline status instantly:")
+        
+        if not students_list:
+            st.info("No active student records available. Please register a student profile first.")
+        else:
+            # Generate clean layout headers
+            h1, h2, h3 = st.columns([2, 1.5, 1.5])
+            h1.markdown("**Student Profile**")
+            h2.markdown("**Action: Present**")
+            h3.markdown("**Action: Absent**")
+            st.markdown("---")
             
-            if submit_att:
-                myproj.execute("SELECT Role FROM student WHERE ID = ?", (stud_id,))
-                stud_check = myproj.fetchone()
-                if stud_check and stud_check[0] == "student":
-                    myproj.execute("INSERT INTO attendence (stud_id, date, status) VALUES (?, ?, ?)", (stud_id, date, status))
+            # Interactive button grid row loop
+            for stud_id, username in students_list:
+                row_col1, row_col2, row_col3 = st.columns([2, 1.5, 1.5])
+                row_col1.write(f"👤 {username} (`{stud_id}`)")
+                
+                # Dynamic action listeners without submitting large parent forms
+                if row_col2.button("✅ Present", key=f"pres_{stud_id}"):
+                    myproj.execute("INSERT INTO attendence (stud_id, date, status) VALUES (?, ?, ?)", (stud_id, session_date, "Present"))
                     myconnect.commit()
-                    st.success(f"Attendance recorded for {date}!")
-                else:
-                    st.error("Error: Student ID not found.")
+                    st.toast(f"Marked {username} Present for {session_date}!", icon="✅")
+                    
+                if row_col3.button("❌ Absent", key=f"abs_{stud_id}"):
+                    myproj.execute("INSERT INTO attendence (stud_id, date, status) VALUES (?, ?, ?)", (stud_id, session_date, "Absent"))
+                    myconnect.commit()
+                    st.toast(f"Marked {username} Absent for {session_date}!", icon="❌")
 
     with tab4:
         st.subheader("Database Overview Logs")
         
         st.write("#### Active Student Profiles")
-        myproj.execute("SELECT ID, UserName FROM student WHERE Role = 'student'")
-        students = myproj.fetchall()
-        if students:
-            st.dataframe(pd.DataFrame(students, columns=["Student ID", "Username"]), use_container_width=True, hide_index=True)
+        if students_list:
+            st.dataframe(pd.DataFrame(students_list, columns=["Student ID", "Username"]), use_container_width=True, hide_index=True)
             
         st.write("#### Global Performance Sheet")
         myproj.execute("SELECT s.UserName, g.stud_id, g.subject, g.marks FROM grades g JOIN student s ON g.stud_id = s.ID")
@@ -291,11 +315,10 @@ def student_dashboard():
     with tab1:
         st.subheader("Your Performance Report")
         
-        # --- DATA FLOW DIAGRAM CONTAINER ---
         with st.container(border=True):
             st.caption("ℹ️ How your grade report is generated:")
             col_a, col_b, col_c = st.columns(3)
-            col_a.metric(label="Step 1: Input Source", value="🍎 Teacher Data Entry", delta="Active")
+            col_a.metric(label="Step 1: Input Source", value="🍎 Dropdown List Selection", delta="Type-free")
             col_b.metric(label="Step 2: Database Store", value="🗄️ grades Table", delta="Secure SQL")
             col_c.metric(label="Step 3: Output Portal", value="📊 Personal Report Card", delta="Filtered to you")
             
