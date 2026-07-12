@@ -1,25 +1,68 @@
 import streamlit as st
 import pandas as pd
+import sqlite3
 
 st.set_page_config(page_title="EduSphere Multi-Role Portal", layout="wide")
 
 # =========================================================================
-# 1. LIVE IN-MEMORY DATABASE STORAGE (Simulating a real database)
+# 1. SQLITE DATABASE INITIALIZATION (Prevents duplicates on refresh)
 # =========================================================================
-if "users_db" not in st.session_state:
-    st.session_state.users_db = {
-        "admin": {"password": "admin123", "role": "Admin", "name": "System Director"},
-        "T101": {"password": "password123", "role": "Teacher", "name": "Prof. Aris", "dept": "Data Science", "class": "Class-A"},
-        "T102": {"password": "password123", "role": "Teacher", "name": "Dr. Meera", "dept": "Mathematics", "class": "Class-B"},
-        "S101": {"password": "student123", "role": "Student", "name": "Aarav Sharma", "class": "Class-A"},
-        "S102": {"password": "student123", "role": "Student", "name": "Isha Patel", "class": "Class-A"}
-    }
+def init_db():
+    conn = sqlite3.connect("edusphere.db")
+    cursor = conn.cursor()
+    
+    # Create Users Table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            user_id TEXT PRIMARY KEY,
+            password TEXT NOT NULL,
+            role TEXT NOT NULL,
+            name TEXT NOT NULL,
+            class TEXT
+        )
+    """)
+    
+    # Create Academic Records Table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS academic_records (
+            student_id TEXT PRIMARY KEY,
+            class TEXT NOT NULL,
+            total_days INTEGER DEFAULT 40,
+            days_present INTEGER DEFAULT 40,
+            attendance_pct REAL DEFAULT 100.0,
+            quiz_1 INTEGER DEFAULT 0,
+            quiz_2 INTEGER DEFAULT 0,
+            feedback TEXT,
+            FOREIGN KEY (student_id) REFERENCES users(user_id) ON DELETE CASCADE
+        )
+    """)
+    
+    # Inject Initial Seed Data safely (Only if tables are empty to avoid duplicates)
+    cursor.execute("SELECT COUNT(*) FROM users")
+    if cursor.fetchone()[0] == 0:
+        initial_users = [
+            ("admin", "admin123", "Admin", "System Director", "Global"),
+            ("T101", "password123", "Teacher", "Prof. Aris", "Class-A"),
+            ("T102", "password123", "Teacher", "Dr. Meera", "Class-B"),
+            ("S101", "student123", "Student", "Aarav Sharma", "Class-A"),
+            ("S102", "student123", "Student", "Isha Patel", "Class-A")
+        ]
+        cursor.executemany("INSERT INTO users VALUES (?, ?, ?, ?, ?)", initial_users)
+        
+        initial_records = [
+            ("S101", "Class-A", 40, 37, 92.5, 85, 90, "Excellent participation."),
+            ("S102", "Class-A", 40, 26, 65.0, 55, 60, "Needs to improve regular attendance.")
+        ]
+        cursor.executemany("INSERT INTO academic_records VALUES (?, ?, ?, ?, ?, ?, ?, ?)", initial_records)
+        
+    conn.commit()
+    conn.close()
 
-if "academic_records" not in st.session_state:
-    st.session_state.academic_records = pd.DataFrame([
-        {"Student ID": "S101", "Class": "Class-A", "Total Days": 40, "Days Present": 37, "Attendance %": 92.5, "Quiz 1": 85, "Quiz 2": 90, "Feedback": "Excellent participation."},
-        {"Student ID": "S102", "Class": "Class-A", "Total Days": 40, "Days Present": 26, "Attendance %": 65.0, "Quiz 1": 55, "Quiz 2": 60, "Feedback": "Needs to improve regular attendance."}
-    ])
+init_db()
+
+# Helper function to get a quick database connection
+def get_db_connection():
+    return sqlite3.connect("edusphere.db")
 
 # Track login session state
 if "logged_in" not in st.session_state:
@@ -32,7 +75,7 @@ if "logged_in" not in st.session_state:
 # =========================================================================
 if not st.session_state.logged_in:
     st.title("🛡️ EduSphere Management Portal")
-    st.subheader("Real-Time Administrative, Faculty, & Student Login Hub")
+    st.subheader("Real-Time SQL-Backed Admin, Faculty, & Student Login Hub")
     
     with st.form("login_form"):
         uid = st.text_input("Enter Unique ID (Admin / T-series / S-series):").strip()
@@ -40,17 +83,29 @@ if not st.session_state.logged_in:
         submit = st.form_submit_button("Authenticate Securely")
         
         if submit:
-            if uid in st.session_state.users_db and st.session_state.users_db[uid]["password"] == pwd:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT password, role FROM users WHERE user_id = ?", (uid,))
+            user = cursor.fetchone()
+            conn.close()
+            
+            if user and user[0] == pwd:
                 st.session_state.logged_in = True
                 st.session_state.user_id = uid
-                st.session_state.user_role = st.session_state.users_db[uid]["role"]
+                st.session_state.user_role = user[1]
                 st.rerun()
             else:
                 st.error("Invalid credentials. Please verify your ID or Password.")
     st.stop()
 
-# Logout Handler in the Sidebar
-st.sidebar.title(f"👤 Welcome, {st.session_state.users_db[st.session_state.user_id]['name']}")
+# Fetch current logged-in user profile details from SQL
+conn = get_db_connection()
+cursor = conn.cursor()
+cursor.execute("SELECT name, class FROM users WHERE user_id = ?", (st.session_state.user_id,))
+user_profile = cursor.fetchone()
+conn.close()
+
+st.sidebar.title(f"👤 Welcome, {user_profile[0]}")
 st.sidebar.write(f"**Role Access Level:** {st.session_state.user_role}")
 if st.sidebar.button("Secure Logout"):
     st.session_state.logged_in = False
@@ -59,15 +114,17 @@ if st.sidebar.button("Secure Logout"):
     st.rerun()
 
 # =========================================================================
-# 3. ADMINISTRATIVE WORKFLOW (PROVISION, MODIFY, & DELETE)
+# 3. ADMINISTRATIVE WORKFLOW (SQL BASED)
 # =========================================================================
 if st.session_state.user_role == "Admin":
     st.title("⚙️ Global Administrative Control Dashboard")
-    st.write("Generate distinct user profiles, modify dynamic records, and manage access parameters.")
+    st.write("Generate user profiles, modify dynamic records, and manage access parameters via SQL database execution.")
     
-    st.subheader("📋 Core Infrastructure User Matrix")
-    display_users = [{"User ID": k, "Name": v["name"], "Role Access": v["role"], "Assigned Room": v.get("class", "Global")} for k, v in st.session_state.users_db.items()]
-    st.dataframe(pd.DataFrame(display_users), use_container_width=True)
+    st.subheader("📋 Core Infrastructure User Matrix (Live SQL Data)")
+    conn = get_db_connection()
+    df_users = pd.read_sql_query("SELECT user_id AS 'User ID', name AS 'Name', role AS 'Role Access', class AS 'Assigned Room' FROM users", conn)
+    conn.close()
+    st.dataframe(df_users, use_container_width=True)
     
     st.markdown("---")
     col1, col2 = st.columns(2)
@@ -87,115 +144,133 @@ if st.session_state.user_role == "Admin":
         if st.button("Generate & Register Credentials"):
             if not new_num or not new_name or not new_pass:
                 st.error("All account credential fields must be properly populated.")
-            elif full_id in st.session_state.users_db:
-                st.error(f"User identity handle {full_id} already exists within records.")
             else:
-                st.session_state.users_db[full_id] = {
-                    "password": new_pass,
-                    "role": new_role,
-                    "name": new_name,
-                    "class": assigned_class
-                }
-                
-                if new_role == "Student":
-                    new_entry = pd.DataFrame([{"Student ID": full_id, "Class": assigned_class, "Total Days": 40, "Days Present": 40, "Attendance %": 100.0, "Quiz 1": 0, "Quiz 2": 0, "Feedback": "Account opened."}])
-                    st.session_state.academic_records = pd.concat([st.session_state.academic_records, new_entry], ignore_index=True)
-                    
-                st.success(f"Successfully configured active production profile for {full_id}")
-                st.rerun()
+                conn = get_db_connection()
+                cursor = conn.cursor()
+                try:
+                    cursor.execute("INSERT INTO users VALUES (?, ?, ?, ?, ?)", (full_id, new_pass, new_role, new_name, assigned_class))
+                    if new_role == "Student":
+                        cursor.execute("INSERT INTO academic_records VALUES (?, ?, 40, 40, 100.0, 0, 0, 'Account opened.')", (full_id, assigned_class))
+                    conn.commit()
+                    st.success(f"Successfully configured active SQL production profile for {full_id}")
+                    conn.close()
+                    st.rerun()
+                except sqlite3.IntegrityError:
+                    st.error(f"User identity handle {full_id} already exists within SQL database keys.")
+                    conn.close()
 
     with col2:
         st.subheader("🛠️ Data Modification & Record Removal Panel")
-        updatable_users = [uid for uid in st.session_state.users_db.keys() if uid != "admin"]
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT user_id FROM users WHERE user_id != 'admin'")
+        updatable_users = [row[0] for row in cursor.fetchall()]
         
         if not updatable_users:
-            st.info("No active teacher or student profiles currently logged in system.")
+            st.info("No active teacher or student profiles found in database.")
+            conn.close()
         else:
             target_uid = st.selectbox("Select Target User ID to Manage:", updatable_users)
-            current_profile = st.session_state.users_db[target_uid]
+            cursor.execute("SELECT role, class, name, password FROM users WHERE user_id = ?", (target_uid,))
+            current_profile = cursor.fetchone()
+            conn.close()
             
-            st.markdown(f"**Current Role:** {current_profile['role']} | **Assigned Room:** {current_profile.get('class', 'N/A')}")
+            st.markdown(f"**Current Role:** {current_profile[0]} | **Assigned Room:** {current_profile[1]}")
             
-            mod_name = st.text_input("Modify Account Full Name:", value=current_profile["name"])
-            mod_pass = st.text_input("Modify Account Password Access:", value=current_profile["password"], type="password")
-            mod_class = st.selectbox("Modify Room Assignment Mapping:", ["Class-A", "Class-B", "Class-C"], index=["Class-A", "Class-B", "Class-C"].index(current_profile.get("class", "Class-A")))
+            mod_name = st.text_input("Modify Account Full Name:", value=current_profile[2])
+            mod_pass = st.text_input("Modify Account Password Access:", value=current_profile[3], type="password")
+            mod_class = st.selectbox("Modify Room Assignment Mapping:", ["Class-A", "Class-B", "Class-C"], index=["Class-A", "Class-B", "Class-C"].index(current_profile[1] if current_profile[1] in ["Class-A", "Class-B", "Class-C"] else "Class-A"))
             
             m_col1, m_col2 = st.columns(2)
             if m_col1.button("💾 Apply Modifications", use_container_width=True):
-                st.session_state.users_db[target_uid]["name"] = mod_name
-                st.session_state.users_db[target_uid]["password"] = mod_pass
-                st.session_state.users_db[target_uid]["class"] = mod_class
-                
-                if current_profile["role"] == "Student":
-                    idx_list = st.session_state.academic_records[st.session_state.academic_records["Student ID"] == target_uid].index
-                    if not idx_list.empty:
-                        st.session_state.academic_records.at[idx_list[0], "Class"] = mod_class
-                        
-                st.success(f"Successfully updated data modifications for account {target_uid}.")
+                conn = get_db_connection()
+                cursor = conn.cursor()
+                cursor.execute("UPDATE users SET name = ?, password = ?, class = ? WHERE user_id = ?", (mod_name, mod_pass, mod_class, target_uid))
+                if current_profile[0] == "Student":
+                    cursor.execute("UPDATE academic_records SET class = ? WHERE student_id = ?", (mod_class, target_uid))
+                conn.commit()
+                conn.close()
+                st.success(f"Successfully saved SQL modifications for {target_uid}.")
                 st.rerun()
                     
             if m_col2.button("🗑️ Permanent Record Purge", type="primary", use_container_width=True):
-                del st.session_state.users_db[target_uid]
-                if current_profile["role"] == "Student":
-                    st.session_state.academic_records = st.session_state.academic_records[st.session_state.academic_records["Student ID"] != target_uid].reset_index(drop=True)
-                st.warning(f"Profile and footprints deleted for handle {target_uid}.")
+                conn = get_db_connection()
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM users WHERE user_id = ?", (target_uid,))
+                cursor.execute("DELETE FROM academic_records WHERE student_id = ?", (target_uid,))
+                conn.commit()
+                conn.close()
+                st.warning(f"Profile and SQL footprints purged for handle {target_uid}.")
                 st.rerun()
 
 # =========================================================================
-# 4. FACULTY WORKFLOW (BUTTON ATTENDANCE & TEXTBOX GRADES)
+# 4. FACULTY WORKFLOW (BUTTON ATTENDANCE & TEXTBOX GRADES SAVE TO SQL)
 # =========================================================================
 elif st.session_state.user_role == "Teacher":
-    teacher_class = st.session_state.users_db[st.session_state.user_id]["class"]
+    teacher_class = user_profile[1]
     st.title(f"👩‍🏫 Course Performance Management Engine: {teacher_class}")
     
-    class_filter = st.session_state.academic_records["Class"] == teacher_class
-    filtered_df = st.session_state.academic_records[class_filter]
+    conn = get_db_connection()
+    filtered_df = pd.read_sql_query("SELECT * FROM academic_records WHERE class = ?", conn, params=(teacher_class,))
+    conn.close()
     
     if filtered_df.empty:
         st.info(f"No students have been assigned to {teacher_class} by administration yet.")
     else:
-        st.subheader("📊 Active Student Ledger View")
-        st.dataframe(filtered_df[["Student ID", "Class", "Days Present", "Total Days", "Attendance %", "Quiz 1", "Quiz 2", "Feedback"]], use_container_width=True)
+        st.subheader("📊 Active Student Ledger View (Live Database Output)")
+        st.dataframe(filtered_df, use_container_width=True)
         
         st.markdown("---")
-        
         col_att, col_grades = st.columns([1, 1])
         
-        target_student = st.selectbox("Select Target Student Record to Update:", filtered_df["Student ID"].tolist())
-        student_idx = st.session_state.academic_records[st.session_state.academic_records["Student ID"] == target_student].index[0]
-        current_data = st.session_state.academic_records.loc[student_idx]
+        target_student = st.selectbox("Select Target Student Record to Update:", filtered_df["student_id"].tolist())
+        
+        # Pull single record from database
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT days_present, total_days, attendance_pct, quiz_1, quiz_2, feedback FROM academic_records WHERE student_id = ?", (target_student,))
+        current_data = cursor.fetchone()
+        conn.close()
         
         with col_att:
             st.subheader("⏱️ Instant Attendance Quick-Mark")
-            st.write(f"Current Stats: **{current_data['Days Present']} / {current_data['Total Days']} Days** ({current_data['Attendance %']}%)")
+            st.write(f"Current Stats: **{current_data[0]} / {current_data[1]} Days** ({current_data[2]}%)")
             
             btn_col1, btn_col2 = st.columns(2)
             if btn_col1.button("✅ Mark Present Today", use_container_width=True):
-                new_present = int(current_data["Days Present"]) + 1
-                new_total = int(current_data["Total Days"]) + 1
-                st.session_state.academic_records.at[student_idx, "Days Present"] = new_present
-                st.session_state.academic_records.at[student_idx, "Total Days"] = new_total
-                st.session_state.academic_records.at[student_idx, "Attendance %"] = round((new_present / new_total) * 100, 1)
-                st.success(f"Added 1 day presence marker to {target_student}!")
+                new_present = int(current_data[0]) + 1
+                new_total = int(current_data[1]) + 1
+                new_pct = round((new_present / new_total) * 100, 1)
+                
+                conn = get_db_connection()
+                cursor = conn.cursor()
+                cursor.execute("UPDATE academic_records SET days_present = ?, total_days = ?, attendance_pct = ? WHERE student_id = ?", (new_present, new_total, new_pct, target_student))
+                conn.commit()
+                conn.close()
+                st.success(f"Added 1 day presence marker in SQL for {target_student}!")
                 st.rerun()
                 
             if btn_col2.button("❌ Mark Absent Today", use_container_width=True):
-                new_total = int(current_data["Total Days"]) + 1
-                st.session_state.academic_records.at[student_idx, "Total Days"] = new_total
-                st.session_state.academic_records.at[student_idx, "Attendance %"] = round((int(current_data["Days Present"]) / new_total) * 100, 1)
-                st.warning(f"Recorded absence tracking marker for {target_student}.")
+                new_total = int(current_data[1]) + 1
+                new_pct = round((int(current_data[0]) / new_total) * 100, 1)
+                
+                conn = get_db_connection()
+                cursor = conn.cursor()
+                cursor.execute("UPDATE academic_records SET total_days = ?, attendance_pct = ? WHERE student_id = ?", (new_total, new_pct, target_student))
+                conn.commit()
+                conn.close()
+                st.warning(f"Recorded absence tracking marker in SQL for {target_student}.")
                 st.rerun()
 
         with col_grades:
             st.subheader("📝 Input Grades & Performance Analysis")
             
             with st.form("grades_form"):
-                # Clean, robust text boxes for exact raw number entry
-                txt_q1 = st.text_input("Quiz 1 Evaluation Score (0-100):", value=str(current_data["Quiz 1"]))
-                txt_q2 = st.text_input("Quiz 2 Evaluation Score (0-100):", value=str(current_data["Quiz 2"]))
-                updated_feed = st.text_area("Provide Student Progress Feedback:", value=current_data["Feedback"])
+                txt_q1 = st.text_input("Quiz 1 Evaluation Score (0-100):", value=str(current_data[3]))
+                txt_q2 = st.text_input("Quiz 2 Evaluation Score (0-100):", value=str(current_data[4]))
+                updated_feed = st.text_area("Provide Student Progress Feedback:", value=current_data[5] if current_data[5] else "")
                 
-                submit_grades = st.form_submit_button("💾 Save Grades & Remarks")
+                submit_grades = st.form_submit_button("💾 Save Grades & Remarks to SQL")
                 
                 if submit_grades:
                     try:
@@ -203,24 +278,28 @@ elif st.session_state.user_role == "Teacher":
                         val_q2 = int(txt_q2)
                         
                         if 0 <= val_q1 <= 100 and 0 <= val_q2 <= 100:
-                            st.session_state.academic_records.at[student_idx, "Quiz 1"] = val_q1
-                            st.session_state.academic_records.at[student_idx, "Quiz 2"] = val_q2
-                            st.session_state.academic_records.at[student_idx, "Feedback"] = updated_feed
-                            st.success("Academic testing markers securely synced.")
+                            conn = get_db_connection()
+                            cursor = conn.cursor()
+                            cursor.execute("UPDATE academic_records SET quiz_1 = ?, quiz_2 = ?, feedback = ? WHERE student_id = ?", (val_q1, val_q2, updated_feed, target_student))
+                            conn.commit()
+                            conn.close()
+                            st.success(f"Academic values updated directly inside SQLite database.")
                             st.rerun()
                         else:
-                            st.error("Input values out of bounds. Please input a grade between 0 and 100.")
+                            st.error("Input values out of bounds. Keep numbers between 0 and 100.")
                     except ValueError:
-                        st.error("Invalid entry detected. Please input whole integers only.")
+                        st.error("Invalid input. Please type numbers only.")
 
 # =========================================================================
-# 5. STUDENT WORKFLOW (METRIC COMPREHENSION & DATA VISUALIZATION)
+# 5. STUDENT WORKFLOW (SQL READING ONLY)
 # =========================================================================
 elif st.session_state.user_role == "Student":
     student_id = st.session_state.user_id
     st.title(f"🎓 Personal Academic Progress Portal")
     
-    student_record = st.session_state.academic_records[st.session_state.academic_records["Student ID"] == student_id]
+    conn = get_db_connection()
+    student_record = pd.read_sql_query("SELECT * FROM academic_records WHERE student_id = ?", conn, params=(student_id,))
+    conn.close()
     
     if student_record.empty:
         st.warning("Your academic parameters haven't been provisioned by the department coordinator yet.")
@@ -228,12 +307,12 @@ elif st.session_state.user_role == "Student":
         record_data = student_record.iloc[0]
         
         kpi1, kpi2, kpi3 = st.columns(3)
-        kpi1.metric(label="Your Logged Attendance Rate", value=f"{record_data['Attendance %']}%")
+        kpi1.metric(label="Your Logged Attendance Rate", value=f"{record_data['attendance_pct']}%")
         
-        avg_score = (int(record_data["Quiz 1"]) + int(record_data["Quiz 2"])) / 2
+        avg_score = (int(record_data["quiz_1"]) + int(record_data["quiz_2"])) / 2
         kpi2.metric(label="Aggregated Academic Test Average", value=f"{avg_score} / 100")
         
-        risk_status = "Good Standing" if record_data["Attendance %"] >= 75 else "Attendance Risk Protocol"
+        risk_status = "Good Standing" if record_data["attendance_pct"] >= 75 else "Attendance Risk Protocol"
         kpi3.metric(label="Operational Accountability Status", value=risk_status)
         
         st.markdown("---")
@@ -243,11 +322,11 @@ elif st.session_state.user_role == "Student":
             st.subheader("📊 Dynamic Metric Analysis View")
             chart_data = pd.DataFrame({
                 "Evaluation Milestones": ["Quiz 1 Assessment", "Quiz 2 Assessment", "Attendance Rate"],
-                "Achieved Ratios (%)": [int(record_data["Quiz 1"]), int(record_data["Quiz 2"]), float(record_data["Attendance %"])]
+                "Achieved Ratios (%)": [int(record_data["quiz_1"]), int(record_data["quiz_2"]), float(record_data["attendance_pct"])]
             }).set_index("Evaluation Milestones")
             
             st.bar_chart(chart_data)
             
         with v_col2:
             st.subheader("💬 Professor Review & Feedback Log")
-            st.info(f"\"{record_data['Feedback']}\"")
+            st.info(f"\"{record_data['feedback']}\"")
