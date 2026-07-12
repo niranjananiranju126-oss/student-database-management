@@ -2,10 +2,11 @@ import streamlit as st
 import sqlite3
 import bcrypt
 import pandas as pd
+import numpy as np
 from datetime import datetime
 
-# Page Configuration for modern dashboard width layout
-st.set_page_config(page_title="Classroom Hub", layout="wide", initial_sidebar_state="expanded")
+# Page Configuration for high-density analytical dashboard layouts
+st.set_page_config(page_title="Analytics Classroom Hub", layout="wide", initial_sidebar_state="expanded")
 
 # ---------------------------------------------------------
 # 1. DATABASE CONNECTION & INITIALIZATION
@@ -86,8 +87,8 @@ def logout():
 # ---------------------------------------------------------
 
 def login_page():
-    st.title("🏫 Classroom Management System")
-    st.markdown("Please enter your secure credentials below to enter the academic management workspace.")
+    st.title("🏫 Classroom Analytics Workspace")
+    st.markdown("Enter credentials to open your environment.")
     
     c1, _ = st.columns([1.5, 2])
     with c1:
@@ -95,7 +96,7 @@ def login_page():
             st.subheader("Sign In")
             username = st.text_input("Username").strip()
             password = st.text_input("Password", type="password").strip()
-            submit = st.form_submit_button("Login to Workspace", use_container_width=True)
+            submit = st.form_submit_button("Launch Environment", use_container_width=True)
             
             if submit:
                 if not username or not password:
@@ -202,38 +203,105 @@ def admin_dashboard():
 
 
 def teacher_dashboard():
-    st.title("🍎 Faculty Workspace")
-    st.markdown(f"Welcome back to your dashboard, **{st.session_state.username}**.")
+    st.title("🍎 Faculty Analytics Command Center")
+    st.markdown(f"User: **{st.session_state.username}** | Role: **Faculty Analyst**")
     
-    # Pre-fetch dynamic metrics to display clear information overview blocks
-    myproj.execute("SELECT COUNT(*) FROM student WHERE Role = 'student'")
-    total_students = myproj.fetchone()[0]
-    
-    myproj.execute("SELECT COUNT(DISTINCT stud_id) FROM grades")
-    graded_students = myproj.fetchone()[0]
-    
+    # Pre-fetch list of active students
     myproj.execute("SELECT ID, UserName FROM student WHERE Role = 'student'")
     students_list = myproj.fetchall()
-
-    # Dynamic Top Insight Metric Overview row
-    m1, m2, m3 = st.columns(3)
-    m1.metric("Registered Students", f"{total_students} Active")
-    m2.metric("Graded Profiles", f"{graded_students} Profiles")
-    m3.metric("Current Session", datetime.today().strftime("%A, %d-%m-%Y"))
     
+    # ---------------------------------------------------------
+    # GLOBAL METRIC CACHING FOR EXPLORATORY ANALSYS
+    # ---------------------------------------------------------
+    myproj.execute("SELECT s.UserName, g.stud_id, g.subject, g.marks FROM grades g JOIN student s ON g.stud_id = s.ID")
+    raw_grades_data = myproj.fetchall()
+    df_grades = pd.DataFrame(raw_grades_data, columns=["Name", "Student_ID", "Subject", "Score"]) if raw_grades_data else pd.DataFrame()
+    
+    myproj.execute("SELECT s.UserName, a.stud_id, a.date, a.status FROM attendence a JOIN student s ON a.stud_id = s.ID")
+    raw_attendance_data = myproj.fetchall()
+    df_attendance = pd.DataFrame(raw_attendance_data, columns=["Name", "Student_ID", "Date", "Status"]) if raw_attendance_data else pd.DataFrame()
+
+    # Dynamic Top Insight Metric Overview row using Pandas engine calculations
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Sample Population (N)", f"{len(students_list)} Students")
+    
+    if not df_grades.empty:
+        m2.metric("Cohort Class Average", f"{df_grades['Score'].mean():.1f}%")
+        m3.metric("Grade Std Deviation (σ)", f"{df_grades['Score'].std():.2f}")
+    else:
+        m2.metric("Cohort Class Average", "No Data")
+        m3.metric("Grade Std Deviation (σ)", "No Data")
+        
+    if not df_attendance.empty:
+        total_records = len(df_attendance)
+        present_records = len(df_attendance[df_attendance["Status"] == "Present"])
+        m4.metric("Global Attendance Rate", f"{(present_records/total_records)*100:.1f}%")
+    else:
+        m4.metric("Global Attendance Rate", "No Data")
+        
     st.markdown("---")
     
-    tab1, tab2, tab3, tab4 = st.tabs(["📅 Quick Attendance", "📝 Quick Grade Input", "📋 Roster Directory", "🆕 Register Student"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Data Analytics Engine", "📅 Check Attendance", "📝 Log Marks", "📋 Roster Records", "🆕 Add Student Profile"])
     
     with tab1:
-        st.subheader("Instant Attendance Session Log")
+        st.subheader("📊 Exploratory Data Analysis & Export Sandbox")
+        st.markdown("Use this environment to inspect distributions, slice feature tables, or export CSV packages for out-of-app scripts.")
+        
+        c_an1, c_an2 = st.columns(2)
+        
+        with c_an1:
+            st.markdown("#### Course Descriptive Analytics")
+            if df_grades.empty:
+                st.info("Log scores to activate descriptive summary matrix tables.")
+            else:
+                st.dataframe(df_grades.describe(), use_container_width=True)
+                
+                # Dynamic Subject Distribution Aggregates
+                subject_aggs = df_grades.groupby("Subject")["Score"].agg(["count", "mean", "min", "max"]).reset_index()
+                st.markdown("#### Subject Strata Breakdown Summary")
+                st.dataframe(subject_aggs, use_container_width=True, hide_index=True)
+                
+        with c_an2:
+            st.markdown("#### Data Pipeline Export Targets")
+            st.caption("Extract application state parameters down directly to working analytical directories.")
+            
+            if not df_grades.empty:
+                csv_grades = df_grades.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="📥 Export Clean Grades Dataset (CSV)",
+                    data=csv_grades,
+                    file_name="classroom_grades_dataset.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
+            else:
+                st.button("📥 Grades Dataset Empty", disabled=True, use_container_width=True)
+                
+            if not df_attendance.empty:
+                csv_att = df_attendance.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="📥 Export Clean Attendance Dataset (CSV)",
+                    data=csv_att,
+                    file_name="classroom_attendance_dataset.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
+            else:
+                st.button("📥 Attendance Dataset Empty", disabled=True, use_container_width=True)
+                
+            # Streamlit built-in line/bar analytical distribution plots
+            if not df_grades.empty:
+                st.markdown("#### Performance Metric Chart Profile")
+                chart_target = df_grades.groupby("Subject")["Score"].mean()
+                st.bar_chart(chart_target)
+
+    with tab2:
+        st.subheader("Instant Attendance Entry Grid")
         session_date = st.date_input("Target Session Date", value=datetime.today()).strftime("%d-%m-%Y")
-        st.write("Clicking a student's tracking status records their value instantly:")
         
         if not students_list:
             st.info("No registered student profiles available.")
         else:
-            # Table-style layout headers
             h1, h2, h3 = st.columns([2, 1, 1])
             h1.markdown("**Student Full Name**")
             h2.markdown("**Status Option A**")
@@ -248,13 +316,15 @@ def teacher_dashboard():
                     myproj.execute("INSERT INTO attendence (stud_id, date, status) VALUES (?, ?, ?)", (stud_id, session_date, "Present"))
                     myconnect.commit()
                     st.toast(f"{username} logged Present!", icon="✅")
+                    st.mini_rerun() if hasattr(st, "mini_rerun") else st.rerun()
                     
                 if row_col3.button("❌ Mark Absent", key=f"abs_{stud_id}", use_container_width=True):
                     myproj.execute("INSERT INTO attendence (stud_id, date, status) VALUES (?, ?, ?)", (stud_id, session_date, "Absent"))
                     myconnect.commit()
                     st.toast(f"{username} logged Absent!", icon="❌")
+                    st.mini_rerun() if hasattr(st, "mini_rerun") else st.rerun()
                     
-    with tab2:
+    with tab3:
         st.subheader("Log Academic Evaluations")
         if not students_list:
             st.info("Please register a student profile to allocate evaluation marks.")
@@ -275,31 +345,28 @@ def teacher_dashboard():
                         myproj.execute("INSERT INTO grades (stud_id, subject, marks) VALUES (?, ?, ?)", (target_stud_id, subject, marks))
                         myconnect.commit()
                         st.success(f"Successfully recorded a grade of **{marks}** in **{subject}**!")
+                        st.rerun()
                     except Exception as err:
                         st.error(f"Database insertion error: {err}")
                         
-    with tab3:
-        st.subheader("Academic Logs & Directory")
-        sub_tab1, sub_tab2 = st.tabs(["Performance Log Book", "Attendance History Sheet"])
+    with tab4:
+        st.subheader("Raw Storage Source Records (SQL View)")
+        sub_tab1, sub_tab2 = st.tabs(["Performance Log Book Table", "Attendance History Sheet Table"])
         
         with sub_tab1:
-            myproj.execute("SELECT s.UserName, g.stud_id, g.subject, g.marks FROM grades g JOIN student s ON g.stud_id = s.ID")
-            grades_log = myproj.fetchall()
-            if grades_log:
-                st.dataframe(pd.DataFrame(grades_log, columns=["Student Username", "Account ID", "Course", "Allocated Score"]), use_container_width=True, hide_index=True)
+            if not df_grades.empty:
+                st.dataframe(df_grades, use_container_width=True, hide_index=True)
             else:
                 st.info("No recorded grades logged in the evaluation matrix yet.")
                 
         with sub_tab2:
-            myproj.execute("SELECT s.UserName, a.stud_id, a.date, a.status FROM attendence a JOIN student s ON a.stud_id = s.ID")
-            att_log = myproj.fetchall()
-            if att_log:
-                st.dataframe(pd.DataFrame(att_log, columns=["Student Username", "Account ID", "Session Date", "Presence Value"]), use_container_width=True, hide_index=True)
+            if not df_attendance.empty:
+                st.dataframe(df_attendance, use_container_width=True, hide_index=True)
             else:
                 st.info("No attendance tracking data captured for any session yet.")
 
-    with tab4:
-        st.subheader("Register a Student Account")
+    with tab5:
+        st.subheader("Register a Student Account Profile")
         with st.form("teacher_add_student_form", clear_on_submit=True):
             cx1, cx2 = st.columns(2)
             s_id = cx1.text_input("Assign Unique Student ID (e.g., S02)").strip()
@@ -329,64 +396,67 @@ def teacher_dashboard():
 
 
 def student_dashboard():
-    st.title("🎓 Student Portal")
-    st.markdown(f"Welcome back to your workspace, **{st.session_state.username}** (Account ID: `{st.session_state.user_id}`)")
+    st.title("🎓 Personal Analytics Workspace")
+    st.markdown(f"Student: **{st.session_state.username}** | Terminal ID: `{st.session_state.user_id}`")
     
-    # Pre-fetch personal data points to build real-time progress KPI overview cards
-    myproj.execute("SELECT AVG(marks), COUNT(*) FROM grades WHERE stud_id = ?", (st.session_state.user_id,))
-    avg_marks, courses_count = myproj.fetchone()
+    # Pre-fetch personal data rows
+    myproj.execute("SELECT subject, marks FROM grades WHERE stud_id = ?", (st.session_state.user_id,))
+    raw_personal_grades = myproj.fetchall()
+    df_p_grades = pd.DataFrame(raw_personal_grades, columns=["Subject", "Score"]) if raw_personal_grades else pd.DataFrame()
     
-    myproj.execute(
-        "SELECT COUNT(*), SUM(CASE WHEN status = 'Present' THEN 1 ELSE 0 END) FROM attendence WHERE stud_id = ?", 
-        (st.session_state.user_id,)
-    )
-    total_days, present_days = myproj.fetchone()
-    att_percentage = (present_days / total_days * 100) if (total_days and total_days > 0) else 0.0
+    myproj.execute("SELECT date, status FROM attendence WHERE stud_id = ?", (st.session_state.user_id,))
+    raw_personal_att = myproj.fetchall()
+    df_p_att = pd.DataFrame(raw_personal_att, columns=["Date", "Status"]) if raw_personal_att else pd.DataFrame()
 
-    # Modern Student Metric Summary Block
+    # Dynamic Student Metric Summary Block
     kpi1, kpi2, kpi3 = st.columns(3)
-    kpi1.metric("Grade Point Average (GPA)", f"{avg_marks:.1f}%" if avg_marks else "N/A", help="Your overall course percentage across evaluations.")
-    kpi2.metric("Completed Evaluations", f"{courses_count} Tests Logged")
-    kpi3.metric("Attendance Frequency Rate", f"{att_percentage:.1f}%" if total_days else "No Data Logged")
+    
+    if not df_p_grades.empty:
+        kpi1.metric("Personal GPA / Mean", f"{df_p_grades['Score'].mean():.1f}%")
+        kpi2.metric("Evaluations Logged", f"{len(df_p_grades)} Tests")
+    else:
+        kpi1.metric("Personal GPA / Mean", "No Grades")
+        kpi2.metric("Evaluations Logged", "0 Tests")
+        
+    if not df_p_att.empty:
+        tot = len(df_p_att)
+        pres = len(df_p_att[df_p_att["Status"] == "Present"])
+        kpi3.metric("Your Attendance Frequency", f"{(pres/tot)*100:.1f}%")
+    else:
+        kpi3.metric("Your Attendance Frequency", "No Data")
     
     st.markdown("---")
     
-    tab1, tab2 = st.tabs(["📊 Personal Report Card", "📅 Attendance Matrix Summary"])
+    tab1, tab2, tab3 = st.tabs(["📊 Personal Report Card", "📅 Attendance Matrix Summary", "🔬 Local Analytics View"])
     
     with tab1:
         st.subheader("Your Academic Term Evaluations")
-        
-        # Transparent process metric diagram block
-        with st.container(border=True):
-            st.caption("⚙️ **Report Processing Cycle Tracker**")
-            col_a, col_b, col_c = st.columns(3)
-            col_a.metric(label="Step 1: Evaluation Input", value="🍎 Form Pick List", delta="Completed")
-            col_b.metric(label="Step 2: Database Layer", value="🗄️ SQL grades Engine", delta="Synced & Secure")
-            col_c.metric(label="Step 3: Render View", value="📊 Filtered View", delta="Personal Access Only")
-            
-        st.markdown("#### Subject Graded Marks")
-        myproj.execute("SELECT subject AS 'Academic Course', marks AS 'Scored Value' FROM grades WHERE stud_id = ?", (st.session_state.user_id,))
-        records = myproj.fetchall()
-        if records:
-            df = pd.DataFrame(records, columns=["Academic Course", "Scored Value"])
-            st.dataframe(df, use_container_width=True, hide_index=True)
+        if not df_p_grades.empty:
+            st.dataframe(df_p_grades, use_container_width=True, hide_index=True)
         else:
             st.info("No course evaluations have been logged to your profile matrix yet.")
             
     with tab2:
         st.subheader("Your Attendance History Dashboard")
-        if total_days and total_days > 0:
-            c_left, c_right = st.columns(2)
-            c_left.metric("Total Tracked Sessions", f"{total_days} Lectures")
-            c_right.metric("Attended Sessions", f"{present_days} Attended")
-            
-            st.markdown("#### Detailed Presence Tracking Logs")
-            myproj.execute("SELECT date AS 'Session Date', status AS 'Logged Status' FROM attendence WHERE stud_id = ?", (st.session_state.user_id,))
-            att_records = myproj.fetchall()
-            df_att = pd.DataFrame(att_records, columns=["Session Date", "Logged Status"])
-            st.dataframe(df_att, use_container_width=True, hide_index=True)
+        if not df_p_att.empty:
+            st.dataframe(df_p_att, use_container_width=True, hide_index=True)
         else:
             st.info("No attendance log information matching your profile credentials located yet.")
+            
+    with tab3:
+        st.subheader("🔬 Local Feature Table Inspection")
+        st.markdown("Review descriptive statistics and metrics calculated from your personal account row vectors.")
+        
+        if df_p_grades.empty:
+            st.info("Analytical data summaries will populate once grades are logged into the system.")
+        else:
+            c_st1, c_st2 = st.columns(2)
+            with c_st1:
+                st.markdown("**Your Internal Metrics Summary**")
+                st.dataframe(df_p_grades.describe(), use_container_width=True)
+            with c_st2:
+                st.markdown("**Your Subject Performance Distribution**")
+                st.bar_chart(df_p_grades.set_index("Subject"))
 
 
 # ---------------------------------------------------------
