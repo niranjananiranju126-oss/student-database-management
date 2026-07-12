@@ -55,7 +55,7 @@ if myproj.fetchone()[0] == 0:
     myproj.execute("INSERT INTO student(ID, UserName, Password, Role) VALUES (?, ?, ?, ?)", ("A01", "admin", hasha, "admin"))
     myconnect.commit()
 
-# Seed baseline data if empty
+# Seed baseline data if empty 
 myproj.execute("SELECT COUNT(*) FROM student")
 if myproj.fetchone()[0] <= 1:
     hasht = bcrypt.hashpw(b"teacher123", bcrypt.gensalt())
@@ -140,6 +140,10 @@ def admin_dashboard():
             if submit:
                 if not new_id or not new_user or not new_pass:
                     st.error("All credential attributes must be assigned.")
+                elif new_role == "teacher" and not new_id.upper().startswith("T"):
+                    st.error("Validation Error: Teacher Register numbers must start with a 'T' (e.g., T02).")
+                elif new_role == "student" and not new_id.upper().startswith("S"):
+                    st.error("Validation Error: Student Register numbers must start with an 'S' (e.g., S02).")
                 else:
                     myproj.execute("SELECT * FROM student WHERE ID = ? OR UserName = ?", (new_id, new_user))
                     if myproj.fetchone():
@@ -211,7 +215,7 @@ def teacher_dashboard():
     students_list = myproj.fetchall()
     
     # ---------------------------------------------------------
-    # GLOBAL METRIC CACHING FOR EXPLORATORY ANALSYS
+    # GLOBAL METRIC CACHING FOR EXPLORATORY ANALYSIS
     # ---------------------------------------------------------
     myproj.execute("SELECT s.UserName, g.stud_id, g.subject, g.marks FROM grades g JOIN student s ON g.stud_id = s.ID")
     raw_grades_data = myproj.fetchall()
@@ -241,7 +245,7 @@ def teacher_dashboard():
         
     st.markdown("---")
     
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Data Analytics Engine", "📅 Check Attendance", "📝 Log Marks", "📋 Roster Records", "🆕 Add Student Profile"])
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["📊 Data Analytics Engine", "🔬 Running Methodologies", "📅 Check Attendance", "📝 Log Marks", "📋 Roster Records", "🆕 Add Student Profile"])
     
     with tab1:
         st.subheader("📊 Exploratory Data Analysis & Export Sandbox")
@@ -289,13 +293,22 @@ def teacher_dashboard():
             else:
                 st.button("📥 Attendance Dataset Empty", disabled=True, use_container_width=True)
                 
-            # Streamlit built-in line/bar analytical distribution plots
             if not df_grades.empty:
                 st.markdown("#### Performance Metric Chart Profile")
                 chart_target = df_grades.groupby("Subject")["Score"].mean()
                 st.bar_chart(chart_target)
 
     with tab2:
+        st.subheader("🔬 System Analytical Models Applied (Cohort Level)")
+        st.info("**Descriptive & Stratified Analysis Engine Details**")
+        st.markdown("""
+        The program operates the following computational layers on your raw classroom tables:
+        * **Descriptive Population Statistics ($N$, $\mu$, $\sigma$):** Automatically tracks overall student counts, running arithmetic averages, and standard deviation to determine spread variance within classes.
+        * **Categorical Feature Stratification:** Slices the continuous target variable (`Score`) across nominal boundaries (`Subject`) using multi-index Pandas reduction aggregates (`count`, `mean`, `min`, `max`).
+        * **Binary Ratio Tracking:** Converts categorical string statuses (`Present` vs `Absent`) into a continuous frequency coefficient ($P/Total$) to measure variance in structural attendance.
+        """)
+
+    with tab3:
         st.subheader("Instant Attendance Entry Grid")
         session_date = st.date_input("Target Session Date", value=datetime.today()).strftime("%d-%m-%Y")
         
@@ -316,13 +329,13 @@ def teacher_dashboard():
                     myproj.execute("INSERT INTO attendence (stud_id, date, status) VALUES (?, ?, ?)", (stud_id, session_date, "Present"))
                     myconnect.commit()
                     st.toast(f"{username} logged Present!", icon="✅")
-                    st.mini_rerun() if hasattr(st, "mini_rerun") else st.rerun()
+                    st.rerun()
                     
                 if row_col3.button("❌ Mark Absent", key=f"abs_{stud_id}", use_container_width=True):
                     myproj.execute("INSERT INTO attendence (stud_id, date, status) VALUES (?, ?, ?)", (stud_id, session_date, "Absent"))
                     myconnect.commit()
                     st.toast(f"{username} logged Absent!", icon="❌")
-                    st.mini_rerun() if hasattr(st, "mini_rerun") else st.rerun()
+                    st.rerun()
                     
     with tab3:
         st.subheader("Log Academic Evaluations")
@@ -349,7 +362,7 @@ def teacher_dashboard():
                     except Exception as err:
                         st.error(f"Database insertion error: {err}")
                         
-    with tab4:
+    with tab5:
         st.subheader("Raw Storage Source Records (SQL View)")
         sub_tab1, sub_tab2 = st.tabs(["Performance Log Book Table", "Attendance History Sheet Table"])
         
@@ -365,7 +378,7 @@ def teacher_dashboard():
             else:
                 st.info("No attendance tracking data captured for any session yet.")
 
-    with tab5:
+    with tab6:
         st.subheader("Register a Student Account Profile")
         with st.form("teacher_add_student_form", clear_on_submit=True):
             cx1, cx2 = st.columns(2)
@@ -377,6 +390,8 @@ def teacher_dashboard():
             if submit_student:
                 if not s_id or not s_name or not s_pass:
                     st.error("All parameters are required to generate a student card.")
+                elif not s_id.upper().startswith("S"):
+                    st.error("Validation Error: Student IDs created by faculty must start with an 'S' (e.g., S02).")
                 else:
                     myproj.execute("SELECT * FROM student WHERE ID = ? OR UserName = ?", (s_id, s_name))
                     if myproj.fetchone():
@@ -427,7 +442,13 @@ def student_dashboard():
     
     st.markdown("---")
     
-    tab1, tab2, tab3 = st.tabs(["📊 Personal Report Card", "📅 Attendance Matrix Summary", "🔬 Local Analytics View"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "📊 Personal Report Card", 
+        "📅 Attendance Matrix Summary", 
+        "🔬 Local Analytics View",
+        "🗺️ Personal Data Flow Diagram",
+        "🧮 Types of Analysis Applied"
+    ])
     
     with tab1:
         st.subheader("Your Academic Term Evaluations")
@@ -457,6 +478,50 @@ def student_dashboard():
             with c_st2:
                 st.markdown("**Your Subject Performance Distribution**")
                 st.bar_chart(df_p_grades.set_index("Subject"))
+
+    with tab4:
+        st.subheader("🗺️ Individual Pipeline Data Flow Diagram (DFD)")
+        st.caption(f"Real-time data flow graph mapping for Student Node: `{st.session_state.user_id}`")
+        
+        # Dynamic calculation of text flow values based on existing dataframe presence
+        grade_count = len(df_p_grades) if not df_p_grades.empty else 0
+        att_count = len(df_p_att) if not df_p_att.empty else 0
+        
+        dfd_ascii = f"""
+   [ Relational Database (classroom.db) ]
+        |
+        |---> SQL Query: "SELECT WHERE stud_id = '{st.session_state.user_id}'"
+        |
+        v
+   [ Data Ingestion & Transformation Layer ]
+        |
+        |-----> Transform Grades into Pandas DataFrame ({grade_count} rows loaded)
+        |-----> Transform Attendance into Pandas DataFrame ({att_count} rows loaded)
+        |
+        v
+   [ Analytical Aggregation Engine ]
+        |
+        |-----> Compute Descriptive Vector: mean(), count(), min(), max()
+        |-----> Compute Status Frequency Ratio: Present / Total Records
+        |
+        v
+   [ UI Rendering Components ]
+        |
+        |---> KPI Summary Containers (Top Grid Widgets)
+        |---> High-Density Streamlit Dataframes (Table Layouts)
+        |---> Dynamic Vector Chart Visualizations (Subject Bar Charts)
+        """
+        st.code(dfd_ascii, language="text")
+
+    with tab5:
+        st.subheader("🧮 Analytical Implementations Applied to Your Data")
+        st.markdown("""
+        To power this profile workspace, the application maps raw relational records through the following analytic operations:
+        1. **Descriptive Summary Slicing:** Uses continuous data analysis techniques (`dataframe.describe()`) to instantly find your personal range maximums, minimum values, standard deviation spread, and 25th/50th/75th percentiles.
+        2. **Nominal Grouping Aggregations:** Slices your grade data by category to isolate exact performance indicators per course subject.
+        3. **Normalized Attendance Rate Calculations:** Tracks your attendance timeline by running a frequency ratio formula:
+        """)
+        st.latex(r"\text{Attendance } \% = \left( \frac{\sum \text{Present Sessions}}{\text{Total Registered Sessions}} \right) \times 100")
 
 
 # ---------------------------------------------------------
