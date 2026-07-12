@@ -59,25 +59,33 @@ if st.sidebar.button("Secure Logout"):
     st.rerun()
 
 # =========================================================================
-# 3. ADMINISTRATIVE WORKFLOW (CREATES CREDENTIALS)
+# 3. ADMINISTRATIVE WORKFLOW (PROVISION, MODIFY, & DELETE)
 # =========================================================================
 if st.session_state.user_role == "Admin":
     st.title("⚙️ Global Administrative Control Dashboard")
-    st.write("Generate distinct user profiles and provision access rules in real time.")
+    st.write("Generate distinct user profiles, modify dynamic records, and manage access parameters.")
+    
+    # Live User Infrastructure Matrix Top Display
+    st.subheader("📋 Core Infrastructure User Matrix")
+    display_users = [{"User ID": k, "Name": v["name"], "Role Access": v["role"], "Assigned Room": v.get("class", "Global")} for k, v in st.session_state.users_db.items()]
+    st.dataframe(pd.DataFrame(display_users), use_container_width=True)
+    
+    st.markdown("---")
     
     col1, col2 = st.columns(2)
+    
+    # BLOCK A: CREATE NEW USERS
     with col1:
         st.subheader("➕ Provision New System Access")
         new_role = st.selectbox("Assign System Role Profile:", ["Teacher", "Student"])
         
-        # ID Prefix Enforcement Strategy
         id_prefix = "T" if new_role == "Teacher" else "S"
-        new_num = st.text_input(f"Enter Account Unique Reference Number ({id_prefix}xxxx):", placeholder="e.g., 103")
+        new_num = st.text_input(f"Enter Account Unique Reference Number ({id_prefix}xxxx):", placeholder="e.g., 103", key="create_num")
         full_id = f"{id_prefix}{new_num}" if new_num else ""
         
-        new_name = st.text_input("Enter Account User Full Name:")
-        new_pass = st.text_input("Set Initial Account Default Password:", type="password")
-        assigned_class = st.selectbox("Assign Primary Class Section Mapping:", ["Class-A", "Class-B", "Class-C"])
+        new_name = st.text_input("Enter Account User Full Name:", key="create_name")
+        new_pass = st.text_input("Set Initial Account Default Password:", type="password", key="create_pass")
+        assigned_class = st.selectbox("Assign Primary Class Section Mapping:", ["Class-A", "Class-B", "Class-C"], key="create_class")
         
         if st.button("Generate & Register Credentials"):
             if not new_num or not new_name or not new_pass:
@@ -85,7 +93,6 @@ if st.session_state.user_role == "Admin":
             elif full_id in st.session_state.users_db:
                 st.error(f"User identity handle {full_id} already exists within records.")
             else:
-                # Dynamically append to credentials map
                 st.session_state.users_db[full_id] = {
                     "password": new_pass,
                     "role": new_role,
@@ -93,18 +100,62 @@ if st.session_state.user_role == "Admin":
                     "class": assigned_class
                 }
                 
-                # If it's a student, instantly instantiate an empty gradebook entry
                 if new_role == "Student":
                     new_entry = pd.DataFrame([{"Student ID": full_id, "Class": assigned_class, "Attendance %": 100, "Quiz 1": 0, "Quiz 2": 0, "Feedback": "Account opened."}])
                     st.session_state.academic_records = pd.concat([st.session_state.academic_records, new_entry], ignore_index=True)
                     
-                st.success(f"Successfully configured active production profile for {full_id} ({new_name})")
+                st.success(f"Successfully configured active production profile for {full_id}")
+                st.rerun()
 
+    # BLOCK B: MODIFY OR DELETE RESTRUCTURING PANEL
     with col2:
-        st.subheader("📋 Core Infrastructure User Matrix")
-        # Transform storage into displayable data frame
-        display_users = [{"User ID": k, "Name": v["name"], "Role Access": v["role"], "Assigned Room": v.get("class", "Global")} for k, v in st.session_state.users_db.items()]
-        st.dataframe(pd.DataFrame(display_users), use_container_width=True)
+        st.subheader("🛠️ Data Modification & Record Removal Panel")
+        
+        # Filter profiles to exclude the active root Admin account
+        updatable_users = [uid for uid in st.session_state.users_db.keys() if uid != "admin"]
+        
+        if not updatable_users:
+            st.info("No active teacher or student profiles currently logged in system.")
+        else:
+            target_uid = st.selectbox("Select Target User ID to Manage:", updatable_users)
+            current_profile = st.session_state.users_db[target_uid]
+            
+            st.markdown(f"**Current Role:** {current_profile['role']} | **Assigned Room:** {current_profile.get('class', 'N/A')}")
+            
+            # Interactive Modification Fields
+            mod_name = st.text_input("Modify Account Full Name:", value=current_profile["name"])
+            mod_pass = st.text_input("Modify Account Password Access:", value=current_profile["password"], type="password")
+            mod_class = st.selectbox("Modify Room Assignment Mapping:", ["Class-A", "Class-B", "Class-C"], index=["Class-A", "Class-B", "Class-C"].index(current_profile.get("class", "Class-A")))
+            
+            m_col1, m_col2 = st.columns(2)
+            
+            with m_col1:
+                if st.button("💾 Apply Modifications", use_container_width=True):
+                    # Save edits into core profiles database
+                    st.session_state.users_db[target_uid]["name"] = mod_name
+                    st.session_state.users_db[target_uid]["password"] = mod_pass
+                    st.session_state.users_db[target_uid]["class"] = mod_class
+                    
+                    # Cascade class change to active gradebook lists if target is a Student
+                    if current_profile["role"] == "Student":
+                        idx_list = st.session_state.academic_records[st.session_state.academic_records["Student ID"] == target_uid].index
+                        if not idx_list.empty:
+                            st.session_state.academic_records.at[idx_list[0], "Class"] = mod_class
+                            
+                    st.success(f"Successfully updated data modifications for account {target_uid}.")
+                    st.rerun()
+                    
+            with m_col2:
+                if st.button("🗑️ Permanent Record Purge", type="primary", use_container_width=True):
+                    # Remove from credentials directory
+                    del st.session_state.users_db[target_uid]
+                    
+                    # Cascade removal across active academic grade lists
+                    if current_profile["role"] == "Student":
+                        st.session_state.academic_records = st.session_state.academic_records[st.session_state.academic_records["Student ID"] != target_uid].reset_index(drop=True)
+                        
+                    st.warning(f"Profile and matching academic footprints deleted for handle {target_uid}.")
+                    st.rerun()
 
 # =========================================================================
 # 4. FACULTY WORKFLOW (GRADES & ATTENDANCE LOGISTICS)
@@ -112,9 +163,7 @@ if st.session_state.user_role == "Admin":
 elif st.session_state.user_role == "Teacher":
     teacher_class = st.session_state.users_db[st.session_state.user_id]["class"]
     st.title(f"👩‍🏫 Course Performance Management Engine: {teacher_class}")
-    st.write("Evaluate performance metrics and record regular progress updates.")
     
-    # Isolate data frames corresponding to this specific section mapping
     class_filter = st.session_state.academic_records["Class"] == teacher_class
     filtered_df = st.session_state.academic_records[class_filter]
     
@@ -128,8 +177,6 @@ elif st.session_state.user_role == "Teacher":
         st.subheader("✍️ Update Student Evaluation File")
         
         target_student = st.selectbox("Select Target Student Record:", filtered_df["Student ID"].tolist())
-        
-        # Pull up current metrics for that student to populate values
         student_idx = st.session_state.academic_records[st.session_state.academic_records["Student ID"] == target_student].index[0]
         current_data = st.session_state.academic_records.loc[student_idx]
         
@@ -158,7 +205,6 @@ elif st.session_state.user_role == "Student":
     student_id = st.session_state.user_id
     st.title(f"🎓 Personal Academic Progress Portal")
     
-    # Retrieve individual specific row vector
     student_record = st.session_state.academic_records[st.session_state.academic_records["Student ID"] == student_id]
     
     if student_record.empty:
@@ -166,14 +212,12 @@ elif st.session_state.user_role == "Student":
     else:
         record_data = student_record.iloc[0]
         
-        # 360 Degree Quick KPI Readout Indicators
         kpi1, kpi2, kpi3 = st.columns(3)
         kpi1.metric(label="Your Logged Attendance Rate", value=f"{record_data['Attendance %']}%")
         
         avg_score = (record_data["Quiz 1"] + record_data["Quiz 2"]) / 2
         kpi2.metric(label="Aggregated Academic Test Average", value=f"{avg_score} / 100")
         
-        # Risk assessment parsing logic
         risk_status = "Good Standing" if record_data["Attendance %"] >= 75 else "Attendance Risk Protocol"
         kpi3.metric(label="Operational Accountability Status", value=risk_status)
         
@@ -182,20 +226,17 @@ elif st.session_state.user_role == "Student":
         v_col1, v_col2 = st.columns([1, 1])
         with v_col1:
             st.subheader("📊 Dynamic Metric Analysis View")
-            # Reshape student row data into a display format for clean charting
             chart_data = pd.DataFrame({
                 "Evaluation Milestones": ["Quiz 1 Assessment", "Quiz 2 Assessment", "Attendance Rate"],
                 "Achieved Ratios (%)": [record_data["Quiz 1"], record_data["Quiz 2"], record_data["Attendance %"]]
             }).set_index("Evaluation Milestones")
             
-            # Use native Streamlit chart to prevent module path crashes
             st.bar_chart(chart_data)
             
         with v_col2:
             st.subheader("💬 Professor Review & Feedback Log")
             st.info(f"\"{record_data['Feedback']}\"")
             
-            # Action items block based on live results
             st.subheader("💡 Strategic Action Items")
             if record_data["Attendance %"] < 75:
                 st.error("🚨 Attendance is below university requirement thresholds. Schedule a check-in with your assigned counselor immediately.")
