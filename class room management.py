@@ -15,6 +15,19 @@ def init_db():
     # Enable foreign keys
     cursor.execute("PRAGMA foreign_keys = ON")
     
+    # --- SAFE MIGRATION STEP ---
+    # Creates the columns if the table exists but is missing the new fields
+    try:
+        cursor.execute("ALTER TABLE academic_records ADD COLUMN exam_marks INTEGER DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+
+    try:
+        cursor.execute("ALTER TABLE academic_records ADD COLUMN extra_curricular_rating INTEGER DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+    # ----------------------------
+
     # 1. Users Table
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS users (
@@ -26,7 +39,7 @@ def init_db():
         )
     """)
     
-    # 2. Academic Records Table (Added Exam Marks & Extra Curricular Tracking)
+    # 2. Academic Records Table
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS academic_records (
             student_id TEXT PRIMARY KEY,
@@ -71,7 +84,6 @@ def init_db():
         ]
         cursor.executemany("INSERT INTO academic_records VALUES (?, ?, ?, ?, ?, ?, ?)", initial_records)
         
-        # Seed some initial attendance history records
         today_str = str(datetime.date.today())
         yesterday_str = str(datetime.date.today() - datetime.timedelta(days=1))
         initial_attendance = [
@@ -89,7 +101,6 @@ init_db()
 def get_db_connection():
     return sqlite3.connect("edusphere.db")
 
-# Track login session state
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
     st.session_state.user_id = None
@@ -123,7 +134,6 @@ if not st.session_state.logged_in:
                 st.error("Invalid credentials. Please verify your ID or Password.")
     st.stop()
 
-# Fetch current logged-in user profile details from SQL
 conn = get_db_connection()
 cursor = conn.cursor()
 cursor.execute("SELECT name, class FROM users WHERE user_id = ?", (st.session_state.user_id,))
@@ -151,7 +161,6 @@ marquee_data = pd.read_sql_query(marquee_query, conn)
 conn.close()
 
 if not marquee_data.empty:
-    # Identify Toppers (Highest Exam Marks) and Extra-Curricular Champions (Rating >= 8)
     highest_mark = marquee_data["exam_marks"].max()
     toppers = marquee_data[marquee_data["exam_marks"] == highest_mark]["name"].tolist()
     star_performers = marquee_data[marquee_data["extra_curricular_rating"] >= 8]["name"].tolist()
@@ -266,7 +275,6 @@ elif st.session_state.user_role == "Teacher":
     teacher_class = user_profile[1]
     st.title(f"👩‍🏫 Course Performance Management Engine: {teacher_class}")
     
-    # Comprehensive query joining academic info and aggregating tracking statistics from the separate log table
     conn = get_db_connection()
     sql_query = """
         SELECT 
@@ -291,7 +299,6 @@ elif st.session_state.user_role == "Teacher":
     if filtered_df.empty:
         st.info(f"No students have been assigned to {teacher_class} by administration yet.")
     else:
-        # Calculate dynamic live percentages directly on load
         filtered_df["Attendance %"] = filtered_df.apply(
             lambda r: round((r["days_present"] / r["total_days"] * 100), 1) if r["total_days"] > 0 else 100.0, axis=1
         )
@@ -307,7 +314,6 @@ elif st.session_state.user_role == "Teacher":
         
         target_student = st.selectbox("Select Target Student Record to Update:", filtered_df["student_id"].tolist())
         
-        # Load single individual student record
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT quiz_1, quiz_2, exam_marks, extra_curricular_rating, feedback FROM academic_records WHERE student_id = ?", (target_student,))
@@ -319,7 +325,6 @@ elif st.session_state.user_role == "Teacher":
             selected_date = st.date_input("Select Working Calendar Date to Log:", datetime.date.today())
             date_str = str(selected_date)
             
-            # Fetch existing logs if marked for this target date
             conn = get_db_connection()
             cursor = conn.cursor()
             cursor.execute("SELECT status FROM attendance_logs WHERE student_id = ? AND date = ?", (target_student, date_str))
@@ -329,7 +334,7 @@ elif st.session_state.user_role == "Teacher":
             if existing_status:
                 st.info(f"Current recorded status on **{date_str}**: **{existing_status[0]}**")
             else:
-                st.warning(f"No log footprint found for {target_student} on {date_str}. Please select below.")
+                st.warning(f"No log footprint found for {target_student} on {date_str}.")
                 
             btn_col1, btn_col2 = st.columns(2)
             if btn_col1.button("✅ Mark Present for Date", use_container_width=True):
@@ -394,7 +399,6 @@ elif st.session_state.user_role == "Student":
     st.title(f"🎓 Personal Academic Progress Portal")
     
     conn = get_db_connection()
-    # Calculate attendance metrics specifically for this student from the date log table
     cursor = conn.cursor()
     cursor.execute("SELECT COUNT(CASE WHEN status = 'Present' THEN 1 END), COUNT(*) FROM attendance_logs WHERE student_id = ?", (student_id,))
     att_stats = cursor.fetchone()
