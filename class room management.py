@@ -16,16 +16,15 @@ def init_db():
     cursor.execute("PRAGMA foreign_keys = ON")
     
     # --- SAFE MIGRATION STEP ---
-    # Creates the columns if the table exists but is missing the new fields
     try:
         cursor.execute("ALTER TABLE academic_records ADD COLUMN exam_marks INTEGER DEFAULT 0")
     except sqlite3.OperationalError:
-        pass  # Column already exists
+        pass  
 
     try:
         cursor.execute("ALTER TABLE academic_records ADD COLUMN extra_curricular_rating INTEGER DEFAULT 0")
     except sqlite3.OperationalError:
-        pass  # Column already exists
+        pass  
     # ----------------------------
 
     # 1. Users Table
@@ -392,7 +391,7 @@ elif st.session_state.user_role == "Teacher":
                         st.error("Invalid entry. Please make sure all entries are numbers only.")
 
 # =========================================================================
-# 6. STUDENT WORKFLOW (SQL READING ONLY)
+# 6. STUDENT WORKFLOW (UPDATED DYNAMIC FEEDBACK STRUCTURE)
 # =========================================================================
 elif st.session_state.user_role == "Student":
     student_id = st.session_state.user_id
@@ -434,4 +433,26 @@ elif st.session_state.user_role == "Student":
             
         with v_col2:
             st.subheader("💬 Professor Review & Feedback Log")
-            st.info(f"\"{record_data['feedback']}\"")
+            
+            # Formatted presentation mirroring how data flows from the entry points to the repository
+            st.markdown("### 📋 Official Performance Summary")
+            
+            # Dynamic grading logic based on metrics flowing from the data schema
+            exam_score = int(record_data['exam_marks'])
+            if exam_score >= 90:
+                performance_tier = "🥇 Tier 1: Outstanding Distinction"
+            elif exam_score >= 75:
+                performance_tier = "🥈 Tier 2: First Class Academic Standing"
+            elif exam_score >= 50:
+                performance_tier = "🥉 Tier 3: Pass Profile (Needs Reinforcement)"
+            else:
+                performance_tier = "⚠️ Tier 4: Review Required"
+                
+            st.markdown(f"**Academic Evaluation Status:** `{performance_tier}`")
+            st.markdown(f"**Co-Curricular Engagement Rating:** `{record_data['extra_curricular_rating']}/10`")
+            
+            st.markdown("#### 📝 Instructor Comments:")
+            if record_data['feedback'] and record_data['feedback'].strip():
+                st.info(f"\"{record_data['feedback']}\"")
+            else:
+                st.info('"No comments recorded for this evaluation cycle yet."')
