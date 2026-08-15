@@ -4,4 +4,4 @@ pillow
 pyzbar
 python-barcode
 matplotlib
-seaborn
+zxing-cpp
