@@ -1,4 +1,7 @@
 streamlit
 pandas
+pillow
+pyzbar
+python-barcode
 matplotlib
 seaborn
