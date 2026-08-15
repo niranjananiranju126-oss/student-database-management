@@ -2,10 +2,16 @@ import io
 import barcode
 from barcode.writer import ImageWriter
 import pandas as pd
-
 from PIL import Image
-from pyzbar.pyzbar import decode
 import streamlit as st
+import zxingcpp
+
+# App Configuration
+st.set_page_config(
+    page_title="Barcode Generator & Scanner",
+    page_icon="🔍",
+    layout="centered",
+)
 
 st.title("Barcode Generator & Scanner")
 
@@ -13,12 +19,12 @@ st.title("Barcode Generator & Scanner")
 tab1, tab2 = st.tabs(["Generate Barcode", "Scan Barcode"])
 
 # ---------------------------------------------------------
-# TAB 1: GENERATE BARCODE (No default input)
+# TAB 1: GENERATE BARCODE (Default input removed)
 # ---------------------------------------------------------
 with tab1:
     st.subheader("Generate a Barcode")
 
-    # Text input with NO default value
+    # Empty text input by default
     user_input = st.text_input(
         "Enter text or numbers for the barcode:", value=""
     )
@@ -34,7 +40,7 @@ with tab1:
                 # Generate barcode in memory
                 code_class = barcode.get_barcode_class(barcode_type)
                 barcode_instance = code_class(
-                    user_input, writer=ImageWriter()
+                    user_input.strip(), writer=ImageWriter()
                 )
 
                 buffer = io.BytesIO()
@@ -44,25 +50,29 @@ with tab1:
                 # Display barcode image
                 img = Image.open(buffer)
                 st.image(
-                    img, caption=f"Generated ({barcode_type.upper()})", use_container_width=True
+                    img,
+                    caption=f"Generated ({barcode_type.upper()})",
+                    use_container_width=True,
                 )
 
                 # Download button for the image
                 st.download_button(
                     label="Download Barcode Image",
                     data=buffer.getvalue(),
-                    file_name=f"barcode_{user_input}.png",
+                    file_name=f"barcode_{user_input.strip()}.png",
                     mime="image/png",
                 )
             except Exception as e:
                 st.error(
-                    f"Error generating barcode: {e}. (Ensure input format matches the selected type, e.g., 12/13 digits for EAN/UPC)."
+                    f"Error generating barcode: {e}. "
+                    "Ensure your input matches the selected barcode type "
+                    "(e.g., EAN-13 requires exactly 12 or 13 numeric digits)."
                 )
         else:
-            st.warning("Please enter text or numeric value first.")
+            st.warning("Please enter a text or numeric value first.")
 
 # ---------------------------------------------------------
-# TAB 2: SCAN BARCODE (Upload image to decode)
+# TAB 2: SCAN BARCODE (Upload image to decode using zxing-cpp)
 # ---------------------------------------------------------
 with tab2:
     st.subheader("Scan & Decode Barcode Image")
@@ -75,8 +85,8 @@ with tab2:
         image = Image.open(uploaded_file)
         st.image(image, caption="Uploaded Image", use_container_width=True)
 
-        # Decode using pyzbar
-        decoded_objects = decode(image)
+        # Decode using zxing-cpp
+        decoded_objects = zxingcpp.read_barcodes(image)
 
         if decoded_objects:
             st.success(f"Found {len(decoded_objects)} barcode(s):")
@@ -84,12 +94,12 @@ with tab2:
             for obj in decoded_objects:
                 results.append(
                     {
-                        "Type": obj.type,
-                        "Data": obj.data.decode("utf-8"),
+                        "Type": str(obj.format).replace("BarcodeFormat.", ""),
+                        "Data": obj.text,
                     }
                 )
 
-            # Display as DataFrame
+            # Display extracted data in a table
             df = pd.DataFrame(results)
             st.dataframe(df, use_container_width=True)
         else:
