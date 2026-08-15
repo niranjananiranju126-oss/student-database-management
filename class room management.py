@@ -20,7 +20,6 @@ st.set_page_config(
 # DATABASE INITIALIZATION IN SESSION STATE
 # ---------------------------------------------------------
 if "users" not in st.session_state:
-    # Default Admin account pre-configured
     st.session_state.users = pd.DataFrame(
         [
             {
@@ -176,7 +175,7 @@ if st.session_state.logged_user is None:
 
         if st.button("Log In", use_container_width=True):
             user_info = authenticate_user(input_id)
-            if user_info and user_info["Pin"] == input_pin.strip():
+            if user_info and str(user_info["Pin"]) == input_pin.strip():
                 st.session_state.logged_user = user_info
                 st.success(f"Login successful as {user_info['Name']}!")
                 st.rerun()
@@ -209,15 +208,16 @@ else:
     # ROLE A: ADMIN DASHBOARD
     # =========================================================
     if user_role == "Admin":
-        admin_tab1, admin_tab2, admin_tab3 = st.tabs(
+        admin_tab1, admin_tab2, admin_tab3, admin_tab4 = st.tabs(
             [
-                "👤 User Registration & Photos",
+                "👤 User Registration",
+                "✏️ Modify / Edit Users",
                 "🏷️ Barcode Generator",
                 "📊 Interactive Analytics",
             ]
         )
 
-        # 1. USER REGISTRATION & PHOTO UPLOADS
+        # 1. USER REGISTRATION
         with admin_tab1:
             st.subheader("Register New User & Attach Profile Photo")
             col_a, col_b = st.columns(2)
@@ -276,23 +276,108 @@ else:
                         st.success(
                             f"Successfully registered {new_role}: {new_name} ({new_id})"
                         )
+                        st.rerun()
                     else:
                         st.warning("User ID already exists.")
                 else:
                     st.warning("Please fill out Name and User ID.")
 
+        # 2. MODIFY / EDIT USER DETAILS
+        with admin_tab2:
+            st.subheader("Modify Existing Student & Teacher Details")
+
+            all_user_ids = st.session_state.users["User ID"].tolist()
+            target_user_id = st.selectbox(
+                "Select User to Edit", all_user_ids, key="edit_selector"
+            )
+
+            # Retrieve selected user details
+            idx = st.session_state.users[
+                st.session_state.users["User ID"] == target_user_id
+            ].index[0]
+            curr_row = st.session_state.users.loc[idx]
+
+            col_edit1, col_edit2 = st.columns(2)
+
+            with col_edit1:
+                edit_name = st.text_input(
+                    "Full Name", value=str(curr_row["Name"])
+                )
+                role_options = ["Student", "Teacher", "Admin"]
+                edit_role = st.selectbox(
+                    "Role",
+                    role_options,
+                    index=role_options.index(curr_row["Role"]),
+                )
+                edit_pin = st.text_input(
+                    "PIN / Password", value=str(curr_row["Pin"])
+                )
+
+                if edit_role == "Student":
+                    edit_grade = st.text_input(
+                        "Overall Grade Summary", value=str(curr_row["Grade"])
+                    )
+                else:
+                    edit_grade = "N/A"
+
+            with col_edit2:
+                st.write("**Current Profile Photo:**")
+                if target_user_id in st.session_state.user_photos:
+                    st.image(
+                        st.session_state.user_photos[target_user_id],
+                        width=120,
+                    )
+                else:
+                    st.info("No profile photo attached.")
+
+                new_photo = st.file_uploader(
+                    "Replace Profile Photo",
+                    type=["jpg", "jpeg", "png"],
+                    key="edit_photo",
+                )
+
+            btn_col1, btn_col2 = st.columns(2)
+            with btn_col1:
+                if st.button("💾 Save Changes", use_container_width=True):
+                    # Update DataFrame fields
+                    st.session_state.users.loc[idx, "Name"] = edit_name.strip()
+                    st.session_state.users.loc[idx, "Role"] = edit_role
+                    st.session_state.users.loc[idx, "Pin"] = edit_pin.strip()
+                    st.session_state.users.loc[idx, "Grade"] = edit_grade
+
+                    if new_photo:
+                        st.session_state.user_photos[target_user_id] = (
+                            Image.open(new_photo)
+                        )
+
+                    st.success(
+                        f"Updated details for **{edit_name}** (`{target_user_id}`)!"
+                    )
+                    st.rerun()
+
+            with btn_col2:
+                if st.button("🗑️ Delete User", type="primary", use_container_width=True):
+                    if target_user_id == current_user["User ID"]:
+                        st.error("You cannot delete your own logged-in Admin account.")
+                    else:
+                        st.session_state.users = st.session_state.users.drop(idx).reset_index(drop=True)
+                        if target_user_id in st.session_state.user_photos:
+                            del st.session_state.user_photos[target_user_id]
+                        st.success(f"User {target_user_id} removed.")
+                        st.rerun()
+
             st.divider()
-            st.subheader("Registered System Users")
+            st.subheader("All System Users")
             st.dataframe(
-                st.session_state.users[["User ID", "Name", "Role"]],
+                st.session_state.users[["User ID", "Name", "Role", "Pin", "Grade"]],
                 use_container_width=True,
             )
 
-        # 2. BARCODE GENERATOR
-        with admin_tab2:
+        # 3. BARCODE GENERATOR
+        with admin_tab3:
             st.subheader("Generate ID Barcode Card")
             user_list = st.session_state.users["User ID"].tolist()
-            selected_user_id = st.selectbox("Select User", user_list)
+            selected_user_id = st.selectbox("Select User", user_list, key="bc_select")
 
             selected_row = st.session_state.users[
                 st.session_state.users["User ID"] == selected_user_id
@@ -334,8 +419,8 @@ else:
                     use_container_width=True,
                 )
 
-        # 3. INTERACTIVE ANALYTICS
-        with admin_tab3:
+        # 4. INTERACTIVE ANALYTICS
+        with admin_tab4:
             st.subheader("System Wide Metrics")
             m1, m2, m3 = st.columns(3)
             m1.metric(
