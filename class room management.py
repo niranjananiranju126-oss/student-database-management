@@ -1,7 +1,9 @@
 from datetime import datetime
 import io
+
 import barcode
 from barcode.writer import ImageWriter
+import matplotlib.pyplot as plt
 import pandas as pd
 from PIL import Image
 import streamlit as st
@@ -9,277 +11,575 @@ import zxingcpp
 
 # Page Config
 st.set_page_config(
-    page_title="Student Attendance & Grade Management",
+    page_title="Role-Based Attendance & Grade System",
     page_icon="🎓",
     layout="wide",
 )
 
 # ---------------------------------------------------------
-# IN-MEMORY DATABASE INITIALIZATION
+# DATABASE INITIALIZATION IN SESSION STATE
 # ---------------------------------------------------------
 if "users" not in st.session_state:
+    # Default Admin account pre-configured
     st.session_state.users = pd.DataFrame(
         [
             {
-                "User ID": "STU101",
-                "Name": "Aarav Sharma",
-                "Role": "Student",
-                "Grade": "A",
+                "User ID": "ADM001",
+                "Name": "System Administrator",
+                "Role": "Admin",
+                "Pin": "1234",
+                "Photo": None,
+                "Grade": "N/A",
             },
             {
                 "User ID": "TEA201",
-                "Name": "Priya Nair",
+                "Name": "Priya Sharma",
                 "Role": "Teacher",
+                "Pin": "1234",
+                "Photo": None,
                 "Grade": "N/A",
+            },
+            {
+                "User ID": "STU101",
+                "Name": "Aarav Patel",
+                "Role": "Student",
+                "Pin": "1234",
+                "Photo": None,
+                "Grade": "88%",
             },
         ]
     )
 
 if "attendance_log" not in st.session_state:
     st.session_state.attendance_log = pd.DataFrame(
-        columns=["Timestamp", "User ID", "Name", "Role", "Entry Type"]
+        [
+            {
+                "Timestamp": "2026-08-15 09:00:00",
+                "User ID": "STU101",
+                "Name": "Aarav Patel",
+                "Status": "Present",
+                "Logged By": "Barcode Scan",
+            }
+        ]
     )
 
-st.title("🎓 Student Attendance & Grade Management System")
-
-# Primary Navigation
-main_tab, scan_tab, report_tab = st.tabs(
-    ["⚙️ Admin Control Panel", "📷 Barcode Scanner & Login", "📊 Records & Reports"]
-)
-
-# ---------------------------------------------------------
-# TAB 1: ADMIN CONTROL PANEL
-# ---------------------------------------------------------
-with main_tab:
-    st.header("Admin Management Hub")
-
-    admin_action = st.radio(
-        "Select Task",
-        ["Generate Barcodes", "Manual Attendance Logging", "Grade Management"],
-        horizontal=True,
+if "grades_db" not in st.session_state:
+    st.session_state.grades_db = pd.DataFrame(
+        [
+            {
+                "User ID": "STU101",
+                "Subject": "Mathematics",
+                "Marks": 92,
+                "Grade": "A+",
+            },
+            {
+                "User ID": "STU101",
+                "Subject": "Science",
+                "Marks": 84,
+                "Grade": "A",
+            },
+            {
+                "User ID": "STU101",
+                "Subject": "English",
+                "Marks": 78,
+                "Grade": "B+",
+            },
+        ]
     )
 
-    # --- 1. BARCODE GENERATION ---
-    if admin_action == "Generate Barcodes":
-        st.subheader("Generate ID Barcode for Teacher / Student")
-        col1, col2 = st.columns(2)
+if "logged_user" not in st.session_state:
+    st.session_state.logged_user = None
 
-        with col1:
-            role = st.selectbox("Role", ["Student", "Teacher"])
-            user_name = st.text_input("Full Name", value="")
-            user_id = st.text_input("User ID (e.g., STU102, TEA202)", value="")
-            initial_grade = st.selectbox(
-                "Initial Grade (Students only)",
-                ["A+", "A", "B", "C", "D", "F", "N/A"],
+if "user_photos" not in st.session_state:
+    st.session_state.user_photos = {}
+
+
+# Helper: Authenticate user by ID
+def authenticate_user(user_id):
+    matched = st.session_state.users[
+        st.session_state.users["User ID"] == user_id.strip()
+    ]
+    if not matched.empty:
+        return matched.iloc[0].to_dict()
+    return None
+
+
+# Helper: Decode scanned barcode payload
+def process_barcode_image(image):
+    results = zxingcpp.read_barcodes(image)
+    if results:
+        for item in results:
+            payload = item.text
+            parts = payload.split(":")
+            if len(parts) >= 2:
+                return parts[1]  # Extracted User ID
+            return payload
+    return None
+
+
+# ---------------------------------------------------------
+# VIEW 1: SEPARATE LOGIN SCREEN
+# ---------------------------------------------------------
+if st.session_state.logged_user is None:
+    st.title("🎓 Portal Login System")
+    st.caption(
+        "Scan your official barcode card or enter credentials to access your portal."
+    )
+
+    login_tab1, login_tab2 = st.tabs(
+        ["📷 Barcode Scan Login", "🔑 Manual Login"]
+    )
+
+    # --- BARCODE SCAN LOGIN ---
+    with login_tab1:
+        st.subheader("Scan Barcode Card to Login")
+        scan_source = st.radio(
+            "Scan Option",
+            ["Webcam Scanner", "Upload Barcode Image"],
+            horizontal=True,
+        )
+
+        img_input = None
+        if scan_source == "Webcam Scanner":
+            cam_file = st.camera_input("Hold Barcode up to Camera")
+            if cam_file:
+                img_input = Image.open(cam_file)
+        else:
+            up_file = st.file_uploader(
+                "Upload Barcode File", type=["png", "jpg", "jpeg"]
             )
+            if up_file:
+                img_input = Image.open(up_file)
 
-        with col2:
-            st.write(" ")
-            st.write(" ")
-            if st.button("Generate & Register Barcode", use_container_width=True):
-                if user_id.strip() and user_name.strip():
-                    # Register User into System DB if not present
+        if img_input is not None:
+            extracted_id = process_barcode_image(img_input)
+            if extracted_id:
+                user_info = authenticate_user(extracted_id)
+                if user_info:
+                    st.session_state.logged_user = user_info
+                    st.success(
+                        f"Welcome back, {user_info['Name']} ({user_info['Role']})!"
+                    )
+                    st.rerun()
+                else:
+                    st.error(
+                        f"User ID '{extracted_id}' recognized from barcode, but not found in user database."
+                    )
+            else:
+                st.error("No clear barcode could be decoded from the image.")
+
+    # --- MANUAL LOGIN ---
+    with login_tab2:
+        st.subheader("Manual Credential Entry")
+        input_id = st.text_input("User ID", value="")
+        input_pin = st.text_input("PIN / Password", type="password", value="")
+
+        if st.button("Log In", use_container_width=True):
+            user_info = authenticate_user(input_id)
+            if user_info and user_info["Pin"] == input_pin.strip():
+                st.session_state.logged_user = user_info
+                st.success(f"Login successful as {user_info['Name']}!")
+                st.rerun()
+            else:
+                st.error("Invalid User ID or PIN. Please try again.")
+
+# ---------------------------------------------------------
+# VIEW 2: AUTHENTICATED DASHBOARDS
+# ---------------------------------------------------------
+else:
+    current_user = st.session_state.logged_user
+    user_role = current_user["Role"]
+
+    # Top Header Banner
+    header_col1, header_col2 = st.columns([4, 1])
+    with header_col1:
+        st.title(f"{user_role} Dashboard")
+        st.caption(
+            f"Logged in as **{current_user['Name']}** (ID: `{current_user['User ID']}`)"
+        )
+    with header_col2:
+        st.write(" ")
+        if st.button("🚪 Logout", use_container_width=True):
+            st.session_state.logged_user = None
+            st.rerun()
+
+    st.divider()
+
+    # =========================================================
+    # ROLE A: ADMIN DASHBOARD
+    # =========================================================
+    if user_role == "Admin":
+        admin_tab1, admin_tab2, admin_tab3 = st.tabs(
+            [
+                "👤 User Registration & Photos",
+                "🏷️ Barcode Generator",
+                "📊 Interactive Analytics",
+            ]
+        )
+
+        # 1. USER REGISTRATION & PHOTO UPLOADS
+        with admin_tab1:
+            st.subheader("Register New User & Attach Profile Photo")
+            col_a, col_b = st.columns(2)
+
+            with col_a:
+                new_role = st.selectbox(
+                    "Assign Role", ["Teacher", "Student", "Admin"]
+                )
+                new_id = st.text_input("Assign User ID (e.g. STU102)", value="")
+                new_name = st.text_input("Full Name", value="")
+                new_pin = st.text_input(
+                    "Set Default PIN", value="1234", type="password"
+                )
+
+            with col_b:
+                photo_file = st.file_uploader(
+                    "Upload Official Photo", type=["jpg", "jpeg", "png"]
+                )
+                if photo_file:
+                    st.image(
+                        Image.open(photo_file),
+                        width=120,
+                        caption="Photo Preview",
+                    )
+
+            if st.button("Register & Grant Access", use_container_width=True):
+                if new_id.strip() and new_name.strip():
                     if (
-                        user_id.strip()
+                        new_id.strip()
                         not in st.session_state.users["User ID"].values
                     ):
-                        new_user = pd.DataFrame(
+                        new_row = pd.DataFrame(
                             [
                                 {
-                                    "User ID": user_id.strip(),
-                                    "Name": user_name.strip(),
-                                    "Role": role,
-                                    "Grade": (
-                                        initial_grade
-                                        if role == "Student"
-                                        else "N/A"
-                                    ),
+                                    "User ID": new_id.strip(),
+                                    "Name": new_name.strip(),
+                                    "Role": new_role,
+                                    "Pin": new_pin.strip(),
+                                    "Photo": photo_file.name
+                                    if photo_file
+                                    else None,
+                                    "Grade": "N/A",
                                 }
                             ]
                         )
                         st.session_state.users = pd.concat(
-                            [st.session_state.users, new_user],
+                            [st.session_state.users, new_row],
                             ignore_index=True,
                         )
 
-                    # Encode Barcode Payload (ROLE:USER_ID:NAME)
-                    payload = f"{role.upper()}:{user_id.strip()}:{user_name.strip()}"
-                    code_class = barcode.get_barcode_class("code128")
-                    barcode_img = code_class(payload, writer=ImageWriter())
+                        if photo_file:
+                            st.session_state.user_photos[new_id.strip()] = (
+                                Image.open(photo_file)
+                            )
 
-                    buffer = io.BytesIO()
-                    barcode_img.write(buffer)
-                    buffer.seek(0)
+                        st.success(
+                            f"Successfully registered {new_role}: {new_name} ({new_id})"
+                        )
+                    else:
+                        st.warning("User ID already exists.")
+                else:
+                    st.warning("Please fill out Name and User ID.")
 
+            st.divider()
+            st.subheader("Registered System Users")
+            st.dataframe(
+                st.session_state.users[["User ID", "Name", "Role"]],
+                use_container_width=True,
+            )
+
+        # 2. BARCODE GENERATOR
+        with admin_tab2:
+            st.subheader("Generate ID Barcode Card")
+            user_list = st.session_state.users["User ID"].tolist()
+            selected_user_id = st.selectbox("Select User", user_list)
+
+            selected_row = st.session_state.users[
+                st.session_state.users["User ID"] == selected_user_id
+            ].iloc[0]
+
+            col_bc1, col_bc2 = st.columns(2)
+            with col_bc1:
+                st.write(f"**Name:** {selected_row['Name']}")
+                st.write(f"**Role:** {selected_row['Role']}")
+
+                if selected_user_id in st.session_state.user_photos:
                     st.image(
-                        Image.open(buffer),
-                        caption=f"Barcode for {user_name} ({user_id})",
-                        use_container_width=True,
+                        st.session_state.user_photos[selected_user_id],
+                        width=140,
+                        caption="Official Photo",
                     )
-                    st.download_button(
-                        label=f"Download Barcode PNG",
-                        data=buffer.getvalue(),
-                        file_name=f"{user_id}_barcode.png",
-                        mime="image/png",
-                        use_container_width=True,
-                    )
-                    st.success(f"Registered {user_name} successfully!")
-                else:
-                    st.warning("Please fill in both Name and User ID.")
 
-    # --- 2. MANUAL ATTENDANCE LOGGING ---
-    elif admin_action == "Manual Attendance Logging":
-        st.subheader("Manual Attendance Entry")
-        col1, col2 = st.columns(2)
+            with col_bc2:
+                payload = (
+                    f"{selected_row['Role'].upper()}:{selected_user_id.strip()}"
+                )
+                code_class = barcode.get_barcode_class("code128")
+                barcode_img = code_class(payload, writer=ImageWriter())
 
-        with col1:
-            selected_id = st.selectbox(
-                "Select Registered User",
-                st.session_state.users["User ID"].tolist(),
+                buffer = io.BytesIO()
+                barcode_img.write(buffer)
+                buffer.seek(0)
+
+                st.image(
+                    Image.open(buffer),
+                    caption=f"Barcode for {selected_row['Name']}",
+                    use_container_width=True,
+                )
+                st.download_button(
+                    label=f"Download Barcode Card ({selected_user_id})",
+                    data=buffer.getvalue(),
+                    file_name=f"barcode_{selected_user_id}.png",
+                    mime="image/png",
+                    use_container_width=True,
+                )
+
+        # 3. INTERACTIVE ANALYTICS
+        with admin_tab3:
+            st.subheader("System Wide Metrics")
+            m1, m2, m3 = st.columns(3)
+            m1.metric(
+                "Total Users", len(st.session_state.users), delta="Active"
             )
-            entry_type = st.selectbox(
-                "Attendance Status", ["Present", "Late", "Absent"]
-            )
-
-        with col2:
-            st.write(" ")
-            st.write(" ")
-            if st.button("Log Attendance Manually", use_container_width=True):
-                user_row = st.session_state.users[
-                    st.session_state.users["User ID"] == selected_id
-                ].iloc[0]
-                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-                log_entry = pd.DataFrame(
-                    [
-                        {
-                            "Timestamp": timestamp,
-                            "User ID": selected_id,
-                            "Name": user_row["Name"],
-                            "Role": user_row["Role"],
-                            "Entry Type": f"Manual ({entry_type})",
-                        }
+            m2.metric(
+                "Total Students",
+                len(
+                    st.session_state.users[
+                        st.session_state.users["Role"] == "Student"
                     ]
-                )
-                st.session_state.attendance_log = pd.concat(
-                    [st.session_state.attendance_log, log_entry],
-                    ignore_index=True,
-                )
-                st.success(
-                    f"Manually logged attendance for {user_row['Name']} at {timestamp}"
-                )
-
-    # --- 3. GRADE MANAGEMENT ---
-    elif admin_action == "Grade Management":
-        st.subheader("Update Student Grades")
-
-        student_users = st.session_state.users[
-            st.session_state.users["Role"] == "Student"
-        ]
-        if not student_users.empty:
-            selected_student_id = st.selectbox(
-                "Select Student", student_users["User ID"].tolist()
+                ),
             )
-            new_grade = st.selectbox(
-                "Assign Grade", ["A+", "A", "B", "C", "D", "F"]
+            m3.metric(
+                "Attendance Records", len(st.session_state.attendance_log)
             )
 
-            if st.button("Update Grade"):
-                st.session_state.users.loc[
-                    st.session_state.users["User ID"] == selected_student_id,
-                    "Grade",
-                ] = new_grade
-                st.success(
-                    f"Updated grade for {selected_student_id} to {new_grade}."
-                )
-        else:
-            st.info("No students currently registered in the database.")
+            st.write(" ")
+            role_counts = st.session_state.users["Role"].value_counts()
+            fig, ax = plt.subplots(figsize=(6, 3))
+            ax.bar(
+                role_counts.index, role_counts.values, color=["#4F46E5", "#10B981", "#F59E0B"]
+            )
+            ax.set_title("User Distribution by Role")
+            st.pyplot(fig)
 
-# ---------------------------------------------------------
-# TAB 2: BARCODE SCANNER & LOGIN
-# ---------------------------------------------------------
-with scan_tab:
-    st.header("Scan Barcode to Log In & Record Attendance")
-
-    scan_source = st.radio(
-        "Input Method", ["Webcam Capture", "Upload Image"], horizontal=True
-    )
-    img_input = None
-
-    if scan_source == "Webcam Capture":
-        cam_file = st.camera_input("Hold Barcode up to Camera")
-        if cam_file:
-            img_input = Image.open(cam_file)
-    else:
-        uploaded_img = st.file_uploader(
-            "Upload Image File", type=["png", "jpg", "jpeg"]
+    # =========================================================
+    # ROLE B: TEACHER DASHBOARD
+    # =========================================================
+    elif user_role == "Teacher":
+        teach_tab1, teach_tab2 = st.tabs(
+            ["📝 Attendance Management", "📚 Grade & Marks Updating"]
         )
-        if uploaded_img:
-            img_input = Image.open(uploaded_img)
 
-    if img_input is not None:
-        decoded_results = zxingcpp.read_barcodes(img_input)
-
-        if decoded_results:
-            for item in decoded_results:
-                raw_payload = item.text
-                parts = raw_payload.split(":")
-
-                if len(parts) == 3:
-                    u_role, u_id, u_name = parts[0], parts[1], parts[2]
-                    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-                    # Record Attendance Log automatically upon scan
-                    auto_log = pd.DataFrame(
-                        [
-                            {
-                                "Timestamp": timestamp,
-                                "User ID": u_id,
-                                "Name": u_name,
-                                "Role": u_role,
-                                "Entry Type": "Barcode Scan",
-                            }
-                        ]
-                    )
-                    st.session_state.attendance_log = pd.concat(
-                        [st.session_state.attendance_log, auto_log],
-                        ignore_index=True,
-                    )
-
-                    st.balloons()
-                    st.success(
-                        f"**Logged In & Attendance Marked!**\n\n"
-                        f"- **Name:** {u_name}\n"
-                        f"- **ID:** {u_id}\n"
-                        f"- **Role:** {u_role}\n"
-                        f"- **Time:** {timestamp}"
-                    )
-                else:
-                    st.error("Invalid Barcode Format detected.")
-        else:
-            st.error("No valid barcode detected in the image.")
-
-# ---------------------------------------------------------
-# TAB 3: RECORDS & REPORTS
-# ---------------------------------------------------------
-with report_tab:
-    st.header("System Databases & Reports")
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        st.subheader("Registered Users & Grades")
-        st.dataframe(st.session_state.users, use_container_width=True)
-
-    with col2:
-        st.subheader("Attendance Log")
-        st.dataframe(st.session_state.attendance_log, use_container_width=True)
-
-        if not st.session_state.attendance_log.empty:
-            csv_data = st.session_state.attendance_log.to_csv(index=False)
-            st.download_button(
-                label="Export Attendance Log CSV",
-                data=csv_data,
-                file_name="attendance_records.csv",
-                mime="text/csv",
+        # 1. MANUAL & BARCODE ATTENDANCE LOGGING
+        with teach_tab1:
+            st.subheader("Record Student Attendance")
+            att_mode = st.radio(
+                "Entry Method",
+                ["Manual Selection", "Barcode Scan"],
+                horizontal=True,
             )
+
+            if att_mode == "Manual Selection":
+                students = st.session_state.users[
+                    st.session_state.users["Role"] == "Student"
+                ]
+                if not students.empty:
+                    selected_stu = st.selectbox(
+                        "Select Student", students["User ID"].tolist()
+                    )
+                    status = st.selectbox(
+                        "Attendance Status", ["Present", "Late", "Absent"]
+                    )
+
+                    if st.button("Log Attendance"):
+                        stu_info = students[
+                            students["User ID"] == selected_stu
+                        ].iloc[0]
+                        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+                        new_entry = pd.DataFrame(
+                            [
+                                {
+                                    "Timestamp": timestamp,
+                                    "User ID": selected_stu,
+                                    "Name": stu_info["Name"],
+                                    "Status": status,
+                                    "Logged By": f"Teacher ({current_user['Name']})",
+                                }
+                            ]
+                        )
+                        st.session_state.attendance_log = pd.concat(
+                            [st.session_state.attendance_log, new_entry],
+                            ignore_index=True,
+                        )
+                        st.success(
+                            f"Recorded '{status}' for {stu_info['Name']} at {timestamp}"
+                        )
+                else:
+                    st.info("No registered students found.")
+            else:
+                st.caption("Scan Student's Barcode to drop attendance")
+                scan_file = st.file_uploader(
+                    "Upload Barcode Image", type=["png", "jpg", "jpeg"]
+                )
+                if scan_file:
+                    scanned_id = process_barcode_image(Image.open(scan_file))
+                    if scanned_id:
+                        stu_match = st.session_state.users[
+                            (st.session_state.users["User ID"] == scanned_id)
+                            & (st.session_state.users["Role"] == "Student")
+                        ]
+                        if not stu_match.empty:
+                            stu_name = stu_match.iloc[0]["Name"]
+                            timestamp = datetime.now().strftime(
+                                "%Y-%m-%d %H:%M:%S"
+                            )
+                            new_entry = pd.DataFrame(
+                                [
+                                    {
+                                        "Timestamp": timestamp,
+                                        "User ID": scanned_id,
+                                        "Name": stu_name,
+                                        "Status": "Present",
+                                        "Logged By": "Teacher Barcode Scan",
+                                    }
+                                ]
+                            )
+                            st.session_state.attendance_log = pd.concat(
+                                [st.session_state.attendance_log, new_entry],
+                                ignore_index=True,
+                            )
+                            st.success(
+                                f"Attendance marked 'Present' for {stu_name}!"
+                            )
+                        else:
+                            st.error(
+                                "Scanned barcode is not a registered student."
+                            )
+
+        # 2. GRADE ENTRY
+        with teach_tab2:
+            st.subheader("Update Student Marks & Grades")
+            students = st.session_state.users[
+                st.session_state.users["Role"] == "Student"
+            ]
+            if not students.empty:
+                stu_id = st.selectbox(
+                    "Select Student ID", students["User ID"].tolist()
+                )
+                subject = st.text_input(
+                    "Subject Name (e.g., Mathematics)", value=""
+                )
+                marks = st.number_input(
+                    "Marks Obtained (0-100)", min_value=0, max_value=100, value=75
+                )
+                grade_letter = st.selectbox(
+                    "Grade", ["A+", "A", "B+", "B", "C", "D", "F"]
+                )
+
+                if st.button("Submit Grade Record"):
+                    if subject.strip():
+                        grade_entry = pd.DataFrame(
+                            [
+                                {
+                                    "User ID": stu_id,
+                                    "Subject": subject.strip(),
+                                    "Marks": marks,
+                                    "Grade": grade_letter,
+                                }
+                            ]
+                        )
+                        st.session_state.grades_db = pd.concat(
+                            [st.session_state.grades_db, grade_entry],
+                            ignore_index=True,
+                        )
+                        st.success(
+                            f"Added {subject} marks for student {stu_id}."
+                        )
+                    else:
+                        st.warning("Please enter a subject name.")
+
+    # =========================================================
+    # ROLE C: STUDENT DASHBOARD
+    # =========================================================
+    elif user_role == "Student":
+        st.subheader(f"Welcome to your Academic Portal, {current_user['Name']}")
+
+        # Student Profile Card with Photo
+        card_col1, card_col2 = st.columns([1, 3])
+        with card_col1:
+            if current_user["User ID"] in st.session_state.user_photos:
+                st.image(
+                    st.session_state.user_photos[current_user["User ID"]],
+                    width=150,
+                    caption="Student Profile Photo",
+                )
+            else:
+                st.info("📷 No Photo Uploaded")
+
+        with card_col2:
+            # Calculate Attendance Percentage
+            stu_logs = st.session_state.attendance_log[
+                st.session_state.attendance_log["User ID"]
+                == current_user["User ID"]
+            ]
+            total_logs = len(stu_logs)
+            presents = len(
+                stu_logs[stu_logs["Status"].isin(["Present", "Late"])]
+            )
+            att_percentage = (
+                (presents / total_logs * 100) if total_logs > 0 else 100.0
+            )
+
+            st.write(f"**Student ID:** `{current_user['User ID']}`")
+            st.write(f"**Official Role:** {current_user['Role']}")
+
+            st.metric(
+                "Overall Attendance",
+                f"{att_percentage:.1f}%",
+                delta="Good Standing" if att_percentage >= 75 else "Warning",
+            )
+            st.progress(att_percentage / 100.0)
+
+        st.divider()
+
+        # Grade & Attendance Tables
+        stu_tab1, stu_tab2 = st.tabs(
+            ["📊 Academic Marks & Performance", "📅 Detailed Attendance Log"]
+        )
+
+        with stu_tab1:
+            st.subheader("Your Subject Grades")
+            stu_grades = st.session_state.grades_db[
+                st.session_state.grades_db["User ID"] == current_user["User ID"]
+            ]
+
+            if not stu_grades.empty:
+                st.dataframe(
+                    stu_grades[["Subject", "Marks", "Grade"]],
+                    use_container_width=True,
+                )
+
+                # Performance chart
+                fig, ax = plt.subplots(figsize=(6, 2.5))
+                ax.bar(
+                    stu_grades["Subject"],
+                    stu_grades["Marks"],
+                    color="#6366F1",
+                )
+                ax.set_ylim(0, 100)
+                ax.set_ylabel("Marks")
+                ax.set_title("Subject Score Performance")
+                st.pyplot(fig)
+            else:
+                st.info("No grade records entered yet by your teacher.")
+
+        with stu_tab2:
+            st.subheader("Your Attendance History")
+            if not stu_logs.empty:
+                st.dataframe(
+                    stu_logs[["Timestamp", "Status", "Logged By"]],
+                    use_container_width=True,
+                )
+            else:
+                st.info("No attendance entries recorded yet.")
