@@ -4,6 +4,7 @@ import io
 import barcode
 from barcode.writer import ImageWriter
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 from PIL import Image
 import streamlit as st
@@ -11,7 +12,7 @@ import zxingcpp
 
 # Page Config
 st.set_page_config(
-    page_title="Role-Based Attendance & Grade System",
+    page_title="Role-Based Attendance, Performance & Ranking System",
     page_icon="🎓",
     layout="wide",
 )
@@ -44,7 +45,23 @@ if "users" not in st.session_state:
                 "Role": "Student",
                 "Pin": "1234",
                 "Photo": None,
-                "Grade": "88%",
+                "Grade": "A+",
+            },
+            {
+                "User ID": "STU102",
+                "Name": "Diya Sengupta",
+                "Role": "Student",
+                "Pin": "1234",
+                "Photo": None,
+                "Grade": "A",
+            },
+            {
+                "User ID": "STU103",
+                "Name": "Rohan Verma",
+                "Role": "Student",
+                "Pin": "1234",
+                "Photo": None,
+                "Grade": "B+",
             },
         ]
     )
@@ -58,7 +75,21 @@ if "attendance_log" not in st.session_state:
                 "Name": "Aarav Patel",
                 "Status": "Present",
                 "Logged By": "Barcode Scan",
-            }
+            },
+            {
+                "Timestamp": "2026-08-15 09:05:00",
+                "User ID": "STU102",
+                "Name": "Diya Sengupta",
+                "Status": "Present",
+                "Logged By": "Barcode Scan",
+            },
+            {
+                "Timestamp": "2026-08-15 09:10:00",
+                "User ID": "STU103",
+                "Name": "Rohan Verma",
+                "Status": "Late",
+                "Logged By": "Teacher Scan",
+            },
         ]
     )
 
@@ -68,20 +99,68 @@ if "grades_db" not in st.session_state:
             {
                 "User ID": "STU101",
                 "Subject": "Mathematics",
-                "Marks": 92,
+                "Marks": 95,
                 "Grade": "A+",
             },
             {
                 "User ID": "STU101",
                 "Subject": "Science",
-                "Marks": 84,
+                "Marks": 92,
+                "Grade": "A+",
+            },
+            {
+                "User ID": "STU102",
+                "Subject": "Mathematics",
+                "Marks": 88,
                 "Grade": "A",
             },
             {
-                "User ID": "STU101",
-                "Subject": "English",
+                "User ID": "STU102",
+                "Subject": "Science",
+                "Marks": 85,
+                "Grade": "A",
+            },
+            {
+                "User ID": "STU103",
+                "Subject": "Mathematics",
+                "Marks": 74,
+                "Grade": "B",
+            },
+            {
+                "User ID": "STU103",
+                "Subject": "Science",
                 "Marks": 78,
                 "Grade": "B+",
+            },
+        ]
+    )
+
+if "credits_db" not in st.session_state:
+    st.session_state.credits_db = pd.DataFrame(
+        [
+            {
+                "User ID": "STU101",
+                "Category": "Sports",
+                "Activity": "Inter-School Basketball",
+                "Points": 25,
+            },
+            {
+                "User ID": "STU101",
+                "Category": "Exams",
+                "Activity": "Math Olympiad",
+                "Points": 20,
+            },
+            {
+                "User ID": "STU102",
+                "Category": "Competition",
+                "Activity": "Science Exhibition 1st Place",
+                "Points": 30,
+            },
+            {
+                "User ID": "STU103",
+                "Category": "Sports",
+                "Activity": "Annual Athletic Meet",
+                "Points": 15,
             },
         ]
     )
@@ -111,13 +190,88 @@ def process_barcode_image(image):
             payload = item.text
             parts = payload.split(":")
             if len(parts) >= 2:
-                return parts[1]  # Extracted User ID
+                return parts[1]
             return payload
     return None
 
 
+# Helper: Calculate Student Performance Leaderboard
+def calculate_leaderboard():
+    students = st.session_state.users[
+        st.session_state.users["Role"] == "Student"
+    ].copy()
+    if students.empty:
+        return pd.DataFrame()
+
+    leaderboard_data = []
+
+    for _, stu in students.iterrows():
+        uid = stu["User ID"]
+
+        # 1. Attendance %
+        stu_att = st.session_state.attendance_log[
+            st.session_state.attendance_log["User ID"] == uid
+        ]
+        total_att = len(stu_att)
+        presents = len(
+            stu_att[stu_att["Status"].isin(["Present", "Late"])]
+        )
+        att_pct = (presents / total_att * 100) if total_att > 0 else 100.0
+
+        # 2. Academic Average Marks
+        stu_grades = st.session_state.grades_db[
+            st.session_state.grades_db["User ID"] == uid
+        ]
+        avg_marks = (
+            stu_grades["Marks"].mean() if not stu_grades.empty else 0.0
+        )
+
+        # 3. Credits Breakdown
+        stu_credits = st.session_state.credits_db[
+            st.session_state.credits_db["User ID"] == uid
+        ]
+        sports_pts = stu_credits[stu_credits["Category"] == "Sports"][
+            "Points"
+        ].sum()
+        comp_pts = stu_credits[stu_credits["Category"] == "Competition"][
+            "Points"
+        ].sum()
+        exam_pts = stu_credits[stu_credits["Category"] == "Exams"][
+            "Points"
+        ].sum()
+        total_credits = sports_pts + comp_pts + exam_pts
+
+        # Overall Weighted Composite Score: 50% Academics + 30% Attendance + 20% Credits (capped at 50 points max)
+        credit_score = min(total_credits, 50) * 2  # scaled to 100
+        composite_score = (
+            (avg_marks * 0.50) + (att_pct * 0.30) + (credit_score * 0.20)
+        )
+
+        leaderboard_data.append(
+            {
+                "Rank": 0,
+                "User ID": uid,
+                "Name": stu["Name"],
+                "Composite Score": round(composite_score, 1),
+                "Academic Avg (%)": round(avg_marks, 1),
+                "Attendance (%)": round(att_pct, 1),
+                "Total Credits": total_credits,
+                "Sports Pts": sports_pts,
+                "Competition Pts": comp_pts,
+                "Exam Pts": exam_pts,
+            }
+        )
+
+    df_lb = pd.DataFrame(leaderboard_data)
+    df_lb = df_lb.sort_values(
+        by="Composite Score", ascending=False
+    ).reset_index(drop=True)
+    df_lb["Rank"] = df_lb.index + 1
+    return df_lb
+
+
 # ---------------------------------------------------------
-# VIEW 1: SEPARATE LOGIN SCREEN
+# VIEW 1: LOGIN SCREEN
 # ---------------------------------------------------------
 if st.session_state.logged_user is None:
     st.title("🎓 Portal Login System")
@@ -129,7 +283,6 @@ if st.session_state.logged_user is None:
         ["📷 Barcode Scan Login", "🔑 Manual Login"]
     )
 
-    # --- BARCODE SCAN LOGIN ---
     with login_tab1:
         st.subheader("Scan Barcode Card to Login")
         scan_source = st.radio(
@@ -167,7 +320,6 @@ if st.session_state.logged_user is None:
             else:
                 st.error("No clear barcode could be decoded from the image.")
 
-    # --- MANUAL LOGIN ---
     with login_tab2:
         st.subheader("Manual Credential Entry")
         input_id = st.text_input("User ID", value="")
@@ -189,7 +341,7 @@ else:
     current_user = st.session_state.logged_user
     user_role = current_user["Role"]
 
-    # Top Header Banner
+    # Top Banner Header
     header_col1, header_col2 = st.columns([4, 1])
     with header_col1:
         st.title(f"{user_role} Dashboard")
@@ -202,19 +354,35 @@ else:
             st.session_state.logged_user = None
             st.rerun()
 
+    # ---------------------------------------------------------
+    # TOP RANKED STUDENT TICKER BANNER (FLOWS THROUGHOUT DASHBOARD)
+    # ---------------------------------------------------------
+    df_leaderboard = calculate_leaderboard()
+    if not df_leaderboard.empty:
+        top_student = df_leaderboard.iloc[0]
+        st.info(
+            f"🏆 **Top Ranked Student Overall:** **{top_student['Name']}** (`{top_student['User ID']}`) | "
+            f"Composite Performance Score: **{top_student['Composite Score']} pts** | "
+            f"Academics: **{top_student['Academic Avg (%)']}%** | "
+            f"Attendance: **{top_student['Attendance (%)']}%** | "
+            f"Total Credits: **{top_student['Total Credits']} pts**"
+        )
     st.divider()
 
     # =========================================================
     # ROLE A: ADMIN DASHBOARD
     # =========================================================
     if user_role == "Admin":
-        admin_tab1, admin_tab2, admin_tab3, admin_tab4 = st.tabs(
-            [
-                "👤 User Registration",
-                "✏️ Modify / Edit Users",
-                "🏷️ Barcode Generator",
-                "📊 Interactive Analytics",
-            ]
+        admin_tab1, admin_tab2, admin_tab3, admin_tab4, admin_tab5 = (
+            st.tabs(
+                [
+                    "👤 User Registration",
+                    "✏️ Modify / Edit Users",
+                    "🏷️ Barcode Generator",
+                    "🏆 Global Performance Analytics",
+                    "📊 System Overview",
+                ]
+            )
         )
 
         # 1. USER REGISTRATION
@@ -226,7 +394,7 @@ else:
                 new_role = st.selectbox(
                     "Assign Role", ["Teacher", "Student", "Admin"]
                 )
-                new_id = st.text_input("Assign User ID (e.g. STU102)", value="")
+                new_id = st.text_input("Assign User ID (e.g. STU104)", value="")
                 new_name = st.text_input("Full Name", value="")
                 new_pin = st.text_input(
                     "Set Default PIN", value="1234", type="password"
@@ -285,13 +453,11 @@ else:
         # 2. MODIFY / EDIT USER DETAILS
         with admin_tab2:
             st.subheader("Modify Existing Student & Teacher Details")
-
             all_user_ids = st.session_state.users["User ID"].tolist()
             target_user_id = st.selectbox(
                 "Select User to Edit", all_user_ids, key="edit_selector"
             )
 
-            # Retrieve selected user details
             idx = st.session_state.users[
                 st.session_state.users["User ID"] == target_user_id
             ].index[0]
@@ -339,7 +505,6 @@ else:
             btn_col1, btn_col2 = st.columns(2)
             with btn_col1:
                 if st.button("💾 Save Changes", use_container_width=True):
-                    # Update DataFrame fields
                     st.session_state.users.loc[idx, "Name"] = edit_name.strip()
                     st.session_state.users.loc[idx, "Role"] = edit_role
                     st.session_state.users.loc[idx, "Pin"] = edit_pin.strip()
@@ -356,11 +521,17 @@ else:
                     st.rerun()
 
             with btn_col2:
-                if st.button("🗑️ Delete User", type="primary", use_container_width=True):
+                if st.button(
+                    "🗑️ Delete User", type="primary", use_container_width=True
+                ):
                     if target_user_id == current_user["User ID"]:
-                        st.error("You cannot delete your own logged-in Admin account.")
+                        st.error(
+                            "You cannot delete your own logged-in Admin account."
+                        )
                     else:
-                        st.session_state.users = st.session_state.users.drop(idx).reset_index(drop=True)
+                        st.session_state.users = st.session_state.users.drop(
+                            idx
+                        ).reset_index(drop=True)
                         if target_user_id in st.session_state.user_photos:
                             del st.session_state.user_photos[target_user_id]
                         st.success(f"User {target_user_id} removed.")
@@ -369,7 +540,9 @@ else:
             st.divider()
             st.subheader("All System Users")
             st.dataframe(
-                st.session_state.users[["User ID", "Name", "Role", "Pin", "Grade"]],
+                st.session_state.users[
+                    ["User ID", "Name", "Role", "Pin", "Grade"]
+                ],
                 use_container_width=True,
             )
 
@@ -377,7 +550,9 @@ else:
         with admin_tab3:
             st.subheader("Generate ID Barcode Card")
             user_list = st.session_state.users["User ID"].tolist()
-            selected_user_id = st.selectbox("Select User", user_list, key="bc_select")
+            selected_user_id = st.selectbox(
+                "Select User", user_list, key="bc_select"
+            )
 
             selected_row = st.session_state.users[
                 st.session_state.users["User ID"] == selected_user_id
@@ -419,9 +594,70 @@ else:
                     use_container_width=True,
                 )
 
-        # 4. INTERACTIVE ANALYTICS
+        # 4. GLOBAL PERFORMANCE ANALYTICS (NEW)
         with admin_tab4:
-            st.subheader("System Wide Metrics")
+            st.subheader("📈 Integrated Student Performance & Rankings")
+            if not df_leaderboard.empty:
+                st.dataframe(
+                    df_leaderboard[
+                        [
+                            "Rank",
+                            "Name",
+                            "User ID",
+                            "Composite Score",
+                            "Academic Avg (%)",
+                            "Attendance (%)",
+                            "Total Credits",
+                            "Sports Pts",
+                            "Competition Pts",
+                            "Exam Pts",
+                        ]
+                    ],
+                    use_container_width=True,
+                )
+
+                # Analytical Multi-Bar Graph
+                st.subheader(
+                    "Comparative Analytics: Academics vs Attendance vs Credits"
+                )
+                fig, ax = plt.subplots(figsize=(10, 4))
+                x = np.arange(len(df_leaderboard))
+                width = 0.25
+
+                ax.bar(
+                    x - width,
+                    df_leaderboard["Academic Avg (%)"],
+                    width,
+                    label="Academic Avg (%)",
+                    color="#4F46E5",
+                )
+                ax.bar(
+                    x,
+                    df_leaderboard["Attendance (%)"],
+                    width,
+                    label="Attendance (%)",
+                    color="#10B981",
+                )
+                ax.bar(
+                    x + width,
+                    df_leaderboard["Total Credits"],
+                    width,
+                    label="Total Credits (pts)",
+                    color="#F59E0B",
+                )
+
+                ax.set_ylabel("Scores / Points")
+                ax.set_title("Student Comparison Breakdown")
+                ax.set_xticks(x)
+                ax.set_xticklabels(df_leaderboard["Name"])
+                ax.legend()
+                st.pyplot(fig)
+            else:
+                st.info("No student data available for ranking.")
+
+        # 5. SYSTEM OVERVIEW
+        with admin_tab5:
+            st.subheader("System Metrics")
             m1, m2, m3 = st.columns(3)
             m1.metric(
                 "Total Users", len(st.session_state.users), delta="Active"
@@ -435,27 +671,23 @@ else:
                 ),
             )
             m3.metric(
-                "Attendance Records", len(st.session_state.attendance_log)
+                "Attendance Logs", len(st.session_state.attendance_log)
             )
-
-            st.write(" ")
-            role_counts = st.session_state.users["Role"].value_counts()
-            fig, ax = plt.subplots(figsize=(6, 3))
-            ax.bar(
-                role_counts.index, role_counts.values, color=["#4F46E5", "#10B981", "#F59E0B"]
-            )
-            ax.set_title("User Distribution by Role")
-            st.pyplot(fig)
 
     # =========================================================
     # ROLE B: TEACHER DASHBOARD
     # =========================================================
     elif user_role == "Teacher":
-        teach_tab1, teach_tab2 = st.tabs(
-            ["📝 Attendance Management", "📚 Grade & Marks Updating"]
+        teach_tab1, teach_tab2, teach_tab3, teach_tab4 = st.tabs(
+            [
+                "📝 Attendance Management",
+                "📚 Grade & Marks Updating",
+                "🏅 Award Credits (Sports/Comp/Exams)",
+                "📈 Student Performance Analytics",
+            ]
         )
 
-        # 1. MANUAL & BARCODE ATTENDANCE LOGGING
+        # 1. ATTENDANCE LOGGING
         with teach_tab1:
             st.subheader("Record Student Attendance")
             att_mode = st.radio(
@@ -500,6 +732,7 @@ else:
                         st.success(
                             f"Recorded '{status}' for {stu_info['Name']} at {timestamp}"
                         )
+                        st.rerun()
                 else:
                     st.info("No registered students found.")
             else:
@@ -537,6 +770,7 @@ else:
                             st.success(
                                 f"Attendance marked 'Present' for {stu_name}!"
                             )
+                            st.rerun()
                         else:
                             st.error(
                                 "Scanned barcode is not a registered student."
@@ -581,14 +815,103 @@ else:
                         st.success(
                             f"Added {subject} marks for student {stu_id}."
                         )
+                        st.rerun()
                     else:
                         st.warning("Please enter a subject name.")
+
+        # 3. AWARD CREDITS (NEW)
+        with teach_tab3:
+            st.subheader("🏅 Log Credits (Sports, Competition, Exams)")
+            students = st.session_state.users[
+                st.session_state.users["Role"] == "Student"
+            ]
+            if not students.empty:
+                c_stuid = st.selectbox(
+                    "Select Student",
+                    students["User ID"].tolist(),
+                    key="credit_stu",
+                )
+                c_category = st.selectbox(
+                    "Credit Category", ["Sports", "Competition", "Exams"]
+                )
+                c_activity = st.text_input(
+                    "Activity Description",
+                    placeholder="e.g. State Level Swimming Competition",
+                )
+                c_points = st.number_input(
+                    "Credit Points Awarded", min_value=1, max_value=50, value=10
+                )
+
+                if st.button("Award Credit Points"):
+                    if c_activity.strip():
+                        c_entry = pd.DataFrame(
+                            [
+                                {
+                                    "User ID": c_stuid,
+                                    "Category": c_category,
+                                    "Activity": c_activity.strip(),
+                                    "Points": c_points,
+                                }
+                            ]
+                        )
+                        st.session_state.credits_db = pd.concat(
+                            [st.session_state.credits_db, c_entry],
+                            ignore_index=True,
+                        )
+                        st.success(
+                            f"Awarded {c_points} points in {c_category} to `{c_stuid}`!"
+                        )
+                        st.rerun()
+                    else:
+                        st.warning("Please enter an activity description.")
+
+            st.divider()
+            st.subheader("All Student Activity Credits Logged")
+            st.dataframe(st.session_state.credits_db, use_container_width=True)
+
+        # 4. TEACHER ANALYTICS & LEADERBOARD (NEW)
+        with teach_tab4:
+            st.subheader("Class Leaderboard & Analytical Graph")
+            if not df_leaderboard.empty:
+                st.dataframe(
+                    df_leaderboard[
+                        [
+                            "Rank",
+                            "Name",
+                            "Composite Score",
+                            "Academic Avg (%)",
+                            "Attendance (%)",
+                            "Total Credits",
+                        ]
+                    ],
+                    use_container_width=True,
+                )
+
+                fig, ax = plt.subplots(figsize=(8, 3.5))
+                ax.barh(
+                    df_leaderboard["Name"],
+                    df_leaderboard["Composite Score"],
+                    color="#6366F1",
+                )
+                ax.set_xlabel("Composite Performance Score")
+                ax.set_title("Overall Student Ranking Index")
+                ax.invert_yaxis()
+                st.pyplot(fig)
 
     # =========================================================
     # ROLE C: STUDENT DASHBOARD
     # =========================================================
     elif user_role == "Student":
         st.subheader(f"Welcome to your Academic Portal, {current_user['Name']}")
+
+        # Retrieve student performance rank from calculation
+        stu_rank_info = (
+            df_leaderboard[
+                df_leaderboard["User ID"] == current_user["User ID"]
+            ]
+            if not df_leaderboard.empty
+            else None
+        )
 
         # Student Profile Card with Photo
         card_col1, card_col2 = st.columns([1, 3])
@@ -603,34 +926,25 @@ else:
                 st.info("📷 No Photo Uploaded")
 
         with card_col2:
-            # Calculate Attendance Percentage
-            stu_logs = st.session_state.attendance_log[
-                st.session_state.attendance_log["User ID"]
-                == current_user["User ID"]
-            ]
-            total_logs = len(stu_logs)
-            presents = len(
-                stu_logs[stu_logs["Status"].isin(["Present", "Late"])]
-            )
-            att_percentage = (
-                (presents / total_logs * 100) if total_logs > 0 else 100.0
-            )
+            m_col1, m_col2, m_col3 = st.columns(3)
+            if stu_rank_info is not None and not stu_rank_info.empty:
+                r_data = stu_rank_info.iloc[0]
+                m_col1.metric("Your Class Rank", f"#{r_data['Rank']}")
+                m_col2.metric("Composite Score", f"{r_data['Composite Score']}")
+                m_col3.metric("Total Credits", f"{r_data['Total Credits']} pts")
 
             st.write(f"**Student ID:** `{current_user['User ID']}`")
             st.write(f"**Official Role:** {current_user['Role']}")
 
-            st.metric(
-                "Overall Attendance",
-                f"{att_percentage:.1f}%",
-                delta="Good Standing" if att_percentage >= 75 else "Warning",
-            )
-            st.progress(att_percentage / 100.0)
-
         st.divider()
 
-        # Grade & Attendance Tables
-        stu_tab1, stu_tab2 = st.tabs(
-            ["📊 Academic Marks & Performance", "📅 Detailed Attendance Log"]
+        # Student Navigation Tabs
+        stu_tab1, stu_tab2, stu_tab3 = st.tabs(
+            [
+                "📊 Marks & Subject Score",
+                "🏆 Credits & Accomplishments",
+                "📅 Detailed Attendance Log",
+            ]
         )
 
         with stu_tab1:
@@ -645,7 +959,6 @@ else:
                     use_container_width=True,
                 )
 
-                # Performance chart
                 fig, ax = plt.subplots(figsize=(6, 2.5))
                 ax.bar(
                     stu_grades["Subject"],
@@ -660,7 +973,38 @@ else:
                 st.info("No grade records entered yet by your teacher.")
 
         with stu_tab2:
+            st.subheader("Your Credits (Sports, Competitions, Exams)")
+            stu_credits = st.session_state.credits_db[
+                st.session_state.credits_db["User ID"]
+                == current_user["User ID"]
+            ]
+
+            if not stu_credits.empty:
+                st.dataframe(
+                    stu_credits[["Category", "Activity", "Points"]],
+                    use_container_width=True,
+                )
+
+                # Category Breakdown Chart
+                cat_summary = stu_credits.groupby("Category")["Points"].sum()
+                fig, ax = plt.subplots(figsize=(5, 3))
+                ax.pie(
+                    cat_summary,
+                    labels=cat_summary.index,
+                    autopct="%1.1f%%",
+                    colors=["#10B981", "#F59E0B", "#6366F1"],
+                )
+                ax.set_title("Credit Points Distribution")
+                st.pyplot(fig)
+            else:
+                st.info("No activity credits awarded yet.")
+
+        with stu_tab3:
             st.subheader("Your Attendance History")
+            stu_logs = st.session_state.attendance_log[
+                st.session_state.attendance_log["User ID"]
+                == current_user["User ID"]
+            ]
             if not stu_logs.empty:
                 st.dataframe(
                     stu_logs[["Timestamp", "Status", "Logged By"]],
