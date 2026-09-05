@@ -394,7 +394,7 @@ else:
                 new_role = st.selectbox(
                     "Assign Role", ["Teacher", "Student", "Admin"]
                 )
-                new_id = st.text_input("Assign User ID (e.g. STU104)", value="")
+                new_id = st.text_input("Assign User ID (e.g. STU104 Or TEA102)", value="")
                 new_name = st.text_input("Full Name", value="")
                 new_pin = st.text_input(
                     "Set Default PIN", value="1234", type="password"
