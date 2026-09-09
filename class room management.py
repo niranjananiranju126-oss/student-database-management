@@ -56,7 +56,7 @@ st.title("🎓 Student Performance Analytics & Management System")
 top_ranker = df_students.iloc[0]
 top_credit_student = df_students.sort_values(by="Credits", ascending=False).iloc[0]
 
-# Ticker/Banner Container
+# ✅ CORRECT: retains only valid parameter 'unsafe_allow_html=True'
 st.markdown(
     f"""
     <div style="background-color: #1E293B; padding: 12px 20px; border-radius: 8px; margin-bottom: 20px; border-left: 5px solid #3B82F6;">
@@ -66,10 +66,8 @@ st.markdown(
         <span style="color: #FBBF24; margin-left: 25px;">📊 <b>Class Average GPA:</b> {df_students['GPA'].mean():.2f}</span>
     </div>
     """,
-    unsafe_clause=True,
     unsafe_allow_html=True
 )
-
 # -----------------------------------------------------------------------------
 # 4. ROLE-BASED ACCESS CONTROL (RBAC) SIDEBAR
 # -----------------------------------------------------------------------------
