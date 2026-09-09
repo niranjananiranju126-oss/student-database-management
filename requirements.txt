@@ -5,3 +5,7 @@ pyzbar
 python-barcode
 matplotlib
 zxing-cpp
+streamlit
+pandas
+numpy
+plotly
